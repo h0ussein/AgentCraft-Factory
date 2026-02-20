@@ -72,8 +72,20 @@ export async function createAgent(name, systemInstruction = "", modelId = "gemin
   return res.json();
 }
 
+/** List all tool files (from disk). Prefer listToolsForAgent when an agent is selected. */
 export async function listTools() {
   const res = await fetch(`${API_BASE}/tools`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to list tools");
+  }
+  return res.json();
+}
+
+/** List only tools attached to the given agent (from DB). Use in chat/tool selector. */
+export async function listToolsForAgent(agentId) {
+  if (!agentId) return { count: 0, files: [] };
+  const res = await fetch(`${API_BASE}/tools?agent_id=${encodeURIComponent(agentId)}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || "Failed to list tools");

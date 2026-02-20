@@ -326,12 +326,31 @@ def chat(request: ChatRequest):
 
 
 @api.get("/tools")
-def list_tools():
-    """List generated tool files."""
+def list_tools(agent_id: str | None = None):
+    """
+    List tools. If agent_id is provided, returns only tools attached to that agent (from DB).
+    If agent_id is omitted, returns all tool files from disk (legacy; prefer agent-scoped when possible).
+    """
+    if agent_id:
+        try:
+            from models.agent import get_agent_by_id
+            from models.tool import get_tools_by_ids
+            from bson import ObjectId
+            agent_doc = get_agent_by_id(agent_id)
+            if not agent_doc or not agent_doc.get("tools"):
+                return {"count": 0, "files": []}
+            tool_docs = get_tools_by_ids(agent_doc["tools"])
+            files = [
+                {"name": t.get("name") or "tool", "path": t.get("file_path") or "", "id": str(t["_id"])}
+                for t in tool_docs
+            ]
+            return {"count": len(files), "files": files}
+        except Exception:
+            return {"count": 0, "files": []}
     files = list_tool_files()
     return {
         "count": len(files),
-        "files": [{"name": p.name, "path": str(p)} for p in files],
+        "files": [{"name": p.stem, "path": str(p)} for p in files],
     }
 
 
@@ -476,11 +495,28 @@ def create_admin_api(
 
 @api.get("/admin/tools")
 def list_admin_tools(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
-    """List all tools (from DB) for admin. Requires admin passcode."""
+    """List all tools (from DB) for admin with agent name. Requires admin passcode."""
     _require_admin_passcode(x_admin_passcode)
     try:
         from models.tool import list_all_tools
-        return {"tools": list_all_tools()}
+        from bson import ObjectId
+        tools = list_all_tools()
+        db = get_db_if_connected()
+        if db:
+            for t in tools:
+                aid = t.get("owner_agent_id")
+                if aid:
+                    try:
+                        agent = db.agents.find_one({"_id": ObjectId(aid)})
+                        t["agent_name"] = (agent.get("name") or "—") if agent else "—"
+                    except Exception:
+                        t["agent_name"] = "—"
+                else:
+                    t["agent_name"] = "—"
+        else:
+            for t in tools:
+                t["agent_name"] = "—"
+        return {"tools": tools}
     except Exception as e:
         if get_db_if_connected() is None:
             raise HTTPException(status_code=503, detail="MongoDB not connected")

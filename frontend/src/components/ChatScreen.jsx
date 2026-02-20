@@ -313,9 +313,9 @@ export default function ChatScreen({
 
       {toolSelectorOpen && (
         <ToolSelectorModal
+          agentId={selectedAgentId}
           onClose={() => setToolSelectorOpen(false)}
           onSelectTool={(tool) => {
-            // Set selected tool instead of inserting text
             setSelectedTool({ name: tool.name, path: tool.path });
             setToolSelectorOpen(false);
           }}

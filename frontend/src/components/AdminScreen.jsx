@@ -339,10 +339,10 @@ export default function AdminScreen() {
                 >
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-white truncate">{tool.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{tool.file_path}</p>
-                    {tool.owner_agent_id && (
-                      <p className="text-xs text-slate-600 mt-0.5">Agent: {tool.owner_agent_id}</p>
-                    )}
+                    <p className="text-xs text-slate-500 truncate mt-0.5">{tool.file_path}</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Agent: {tool.agent_name || tool.owner_agent_id || "—"}
+                    </p>
                   </div>
                   <button
                     type="button"

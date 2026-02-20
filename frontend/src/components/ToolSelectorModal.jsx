@@ -1,12 +1,13 @@
 /**
- * Tool Selector Modal – Shows available tools for selection
- * Displayed when the plus icon in chat input is clicked
+ * Tool Selector Modal – Shows tools attached to the current agent only.
+ * Displayed when the plus icon in chat input is clicked.
+ * Scoped by agentId so users only see and can call tools for their agent.
  */
 
 import { useState, useEffect } from "react";
-import { listTools } from "../api";
+import { listToolsForAgent } from "../api";
 
-export default function ToolSelectorModal({ onClose, onSelectTool }) {
+export default function ToolSelectorModal({ onClose, onSelectTool, agentId = null }) {
   const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -16,7 +17,7 @@ export default function ToolSelectorModal({ onClose, onSelectTool }) {
       try {
         setLoading(true);
         setError(null);
-        const data = await listTools();
+        const data = await listToolsForAgent(agentId);
         setTools(data.files || []);
       } catch (err) {
         setError(err.message || "Failed to load tools");
@@ -25,7 +26,7 @@ export default function ToolSelectorModal({ onClose, onSelectTool }) {
       }
     }
     fetchTools();
-  }, []);
+  }, [agentId]);
 
   const handleToolSelect = (tool) => {
     onSelectTool(tool);
@@ -74,7 +75,11 @@ export default function ToolSelectorModal({ onClose, onSelectTool }) {
 
         {!loading && !error && tools.length === 0 && (
           <div className="py-8">
-            <p className="text-sm text-slate-400 text-center">No tools available. Create a tool first.</p>
+            <p className="text-sm text-slate-400 text-center">
+              {agentId
+                ? "No tools attached to this agent. Create a tool and assign it to this agent."
+                : "Select an agent and start a chat to see their tools."}
+            </p>
           </div>
         )}
 
@@ -82,7 +87,7 @@ export default function ToolSelectorModal({ onClose, onSelectTool }) {
           <div className="space-y-2">
             {tools.map((tool, index) => (
               <button
-                key={index}
+                key={tool.id || index}
                 onClick={() => handleToolSelect(tool)}
                 className="w-full text-left px-4 py-3 rounded-xl bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 hover:border-purple-500/50 transition-colors group"
               >
