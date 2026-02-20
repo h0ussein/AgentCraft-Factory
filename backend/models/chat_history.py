@@ -140,3 +140,35 @@ def get_session_history(session_id: str, agent_id: str | None = None) -> dict | 
         return doc
     except Exception:
         return None
+
+
+def delete_session(session_id: str, agent_id: str | None = None) -> bool:
+    """
+    Delete a chat session.
+    Returns True if deleted, False if not found.
+    """
+    try:
+        col = get_chat_history_collection()
+        query = {"session_id": session_id}
+        if agent_id:
+            agent_oid = str(agent_id) if isinstance(agent_id, ObjectId) else agent_id
+            query["agent_id"] = agent_oid
+        
+        result = col.delete_one(query)
+        return result.deleted_count > 0
+    except Exception:
+        return False
+
+
+def delete_all_sessions_for_agent(agent_id: str) -> int:
+    """
+    Delete all chat sessions for a specific agent.
+    Returns the number of sessions deleted.
+    """
+    try:
+        col = get_chat_history_collection()
+        agent_oid = str(agent_id) if isinstance(agent_id, ObjectId) else agent_id
+        result = col.delete_many({"agent_id": agent_oid})
+        return result.deleted_count
+    except Exception:
+        return 0

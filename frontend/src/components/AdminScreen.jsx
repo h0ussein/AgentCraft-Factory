@@ -1,14 +1,16 @@
 /**
- * Admin screen – passcode to unlock, then list agents with Delete buttons
+ * Admin screen – passcode to unlock, then list agents and chats with Delete buttons
  */
 
 import { useState, useEffect } from "react";
-import { listAgents, verifyAdminPasscode, deleteAgent } from "../api";
+import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession } from "../api";
 
 export default function AdminScreen() {
   const [passcode, setPasscode] = useState("");
   const [unlocked, setUnlocked] = useState(false);
+  const [activeTab, setActiveTab] = useState("agents"); // "agents" or "chats"
   const [agents, setAgents] = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
@@ -18,12 +20,26 @@ export default function AdminScreen() {
     setLoading(true);
     setError(null);
     let cancelled = false;
-    listAgents()
-      .then((data) => { if (!cancelled) setAgents(data.agents || []); })
-      .catch((err) => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    
+    const loadData = async () => {
+      try {
+        if (activeTab === "agents") {
+          const data = await listAgents();
+          if (!cancelled) setAgents(data.agents || []);
+        } else {
+          const data = await listSessions();
+          if (!cancelled) setSessions(data.sessions || []);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    
+    loadData();
     return () => { cancelled = true; };
-  }, [unlocked]);
+  }, [unlocked, activeTab]);
 
   async function handleUnlock(e) {
     e.preventDefault();
@@ -43,7 +59,7 @@ export default function AdminScreen() {
     setError(null);
   }
 
-  async function handleDelete(agentId) {
+  async function handleDeleteAgent(agentId) {
     setError(null);
     setDeletingId(agentId);
     try {
@@ -55,6 +71,28 @@ export default function AdminScreen() {
       setDeletingId(null);
     }
   }
+
+  async function handleDeleteSession(sessionId, agentId) {
+    setError(null);
+    setDeletingId(sessionId);
+    try {
+      await deleteSession(sessionId, agentId, passcode.trim());
+      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+    } catch (err) {
+      setError(err.message || "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  const formatTime = (timeStr) => {
+    try {
+      const date = new Date(timeStr);
+      return date.toLocaleString();
+    } catch {
+      return "Unknown";
+    }
+  };
 
   const backToApp = () => { window.location.href = "/"; };
 
@@ -70,7 +108,7 @@ export default function AdminScreen() {
             ← Back to app
           </button>
           <h1 className="text-xl font-semibold text-white">Admin</h1>
-          <p className="text-sm text-slate-400 mt-0.5">Enter passcode to manage agents</p>
+          <p className="text-sm text-slate-400 mt-0.5">Enter passcode to manage agents and chats</p>
         </header>
         <div className="flex-1 overflow-y-auto px-4 py-6">
           <form onSubmit={handleUnlock} className="max-w-xs space-y-4">
@@ -109,9 +147,32 @@ export default function AdminScreen() {
         >
           ← Back to app
         </button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold text-white">Admin</h1>
-          <p className="text-sm text-slate-400 mt-0.5">Delete agents</p>
+          <div className="flex gap-2 mt-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab("agents")}
+              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "agents"
+                  ? "bg-amber-500 text-slate-900"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              Agents
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("chats")}
+              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "chats"
+                  ? "bg-amber-500 text-slate-900"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              Chats
+            </button>
+          </div>
         </div>
         <button
           type="button"
@@ -135,30 +196,68 @@ export default function AdminScreen() {
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
           </div>
-        ) : agents.length === 0 ? (
-          <p className="text-slate-400 text-sm">No agents to manage.</p>
-        ) : (
-          <ul className="space-y-3">
-            {agents.map((agent) => (
-              <li
-                key={agent.id}
-                className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/70 border border-slate-600/50 p-3"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium text-white truncate">{agent.name}</p>
-                  <p className="text-xs text-slate-500">{agent.model_id}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(agent.id)}
-                  disabled={deletingId === agent.id}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 text-sm font-medium"
+        ) : activeTab === "agents" ? (
+          agents.length === 0 ? (
+            <p className="text-slate-400 text-sm">No agents to manage.</p>
+          ) : (
+            <ul className="space-y-3">
+              {agents.map((agent) => (
+                <li
+                  key={agent.id}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/70 border border-slate-600/50 p-3"
                 >
-                  {deletingId === agent.id ? "Deleting…" : "Delete"}
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-white truncate">{agent.name}</p>
+                    <p className="text-xs text-slate-500">{agent.model_id}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteAgent(agent.id)}
+                    disabled={deletingId === agent.id}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 text-sm font-medium"
+                  >
+                    {deletingId === agent.id ? "Deleting…" : "Delete"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
+          sessions.length === 0 ? (
+            <p className="text-slate-400 text-sm">No chat sessions to manage.</p>
+          ) : (
+            <ul className="space-y-3">
+              {sessions.map((session) => (
+                <li
+                  key={session.session_id}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/70 border border-slate-600/50 p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-white truncate text-sm">
+                      Session: {session.session_id.substring(0, 20)}...
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Agent: {session.agent_id || "Default"} • {session.message_count} messages
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Last: {formatTime(session.last_message_time)}
+                    </p>
+                    {session.preview && (
+                      <p className="text-xs text-slate-500 mt-1 truncate">"{session.preview}"</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSession(session.session_id, session.agent_id)}
+                    disabled={deletingId === session.session_id}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 text-sm font-medium"
+                  >
+                    {deletingId === session.session_id ? "Deleting…" : "Delete"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
         )}
       </div>
     </div>

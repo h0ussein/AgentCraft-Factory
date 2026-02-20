@@ -22,7 +22,7 @@ from agent_factory import run_agent_chat
 from config.db import get_db_if_connected
 from config.gemini_keys import get_gemini_api_keys
 from services.agents import list_agents_from_db
-from models.chat_history import list_all_sessions, get_session_history
+from models.chat_history import list_all_sessions, get_session_history, delete_session, delete_all_sessions_for_agent
 
 # MongoDB: try to connect first on startup, then close on shutdown
 @asynccontextmanager
@@ -391,7 +391,7 @@ def delete_agent(
     agent_id: str,
     x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
 ):
-    """Delete an agent. Requires X-Admin-Passcode header to match ADMIN_PASSCODE in .env."""
+    """Delete an agent and all related chat sessions. Requires X-Admin-Passcode header to match ADMIN_PASSCODE in .env."""
     admin_passcode = (os.getenv("ADMIN_PASSCODE") or "").strip()
     if not admin_passcode:
         raise HTTPException(
@@ -409,6 +409,10 @@ def delete_agent(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid agent id")
     try:
+        # First, delete all chat sessions associated with this agent
+        deleted_sessions_count = delete_all_sessions_for_agent(agent_id)
+        
+        # Then delete the agent
         result = db.agents.delete_one({"_id": oid})
     except (ServerSelectionTimeoutError, ConnectionFailure) as e:
         raise HTTPException(
@@ -417,7 +421,37 @@ def delete_agent(
         ) from e
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return {"ok": True, "message": "Agent deleted"}
+    return {
+        "ok": True,
+        "message": f"Agent deleted. {deleted_sessions_count} related chat session(s) also deleted."
+    }
+
+
+@api.delete("/sessions/{session_id}")
+def delete_session_endpoint(
+    session_id: str,
+    agent_id: str | None = None,
+    x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
+):
+    """Delete a chat session. Requires X-Admin-Passcode header to match ADMIN_PASSCODE in .env."""
+    admin_passcode = (os.getenv("ADMIN_PASSCODE") or "").strip()
+    if not admin_passcode:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin delete not configured. Set ADMIN_PASSCODE in .env",
+        )
+    if not x_admin_passcode or x_admin_passcode.strip() != admin_passcode:
+        raise HTTPException(status_code=403, detail="Invalid admin passcode")
+    db = get_db_if_connected()
+    if db is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    try:
+        deleted = delete_session(session_id, agent_id=agent_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete session: {e}")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"ok": True, "message": "Session deleted"}
 
 
 app.include_router(api, prefix="/api")

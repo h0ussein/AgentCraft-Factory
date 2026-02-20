@@ -125,3 +125,17 @@ export async function deleteAgent(agentId, passcode) {
   }
   return res.json();
 }
+
+/** Delete a chat session. Requires admin passcode in header. */
+export async function deleteSession(sessionId, agentId = null, passcode) {
+  const url = agentId ? `${API_BASE}/sessions/${sessionId}?agent_id=${agentId}` : `${API_BASE}/sessions/${sessionId}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { "X-Admin-Passcode": passcode },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to delete session");
+  }
+  return res.json();
+}

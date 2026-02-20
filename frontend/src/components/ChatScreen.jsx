@@ -24,6 +24,7 @@ export default function ChatScreen({
   const [loadingHistory, setLoadingHistory] = useState(!!propSessionId);
   const [error, setError] = useState(null);
   const [toolSelectorOpen, setToolSelectorOpen] = useState(false);
+  const [selectedTool, setSelectedTool] = useState(null); // { name, path }
   const bottomRef = useRef(null);
 
   // Update sessionId when propSessionId changes
@@ -95,12 +96,20 @@ export default function ChatScreen({
     e.preventDefault();
     const text = input.trim();
     if (!text || loading) return;
+    
+    // Build message with tool reference if tool is selected
+    let messageToSend = text;
+    if (selectedTool) {
+      messageToSend = `Use tool: ${selectedTool.name}\n\n${text}`;
+    }
+    
     setInput("");
     setError(null);
+    setSelectedTool(null); // Clear selected tool after sending
     setMessages((prev) => [...prev, { role: "user", content: text, id: `u-${Date.now()}` }]);
     setLoading(true);
     try {
-      const data = await sendChat(text, sessionId, selectedAgentId || undefined);
+      const data = await sendChat(messageToSend, sessionId, selectedAgentId || undefined);
       const reply = data?.response ?? "No response.";
       // Update sessionId if backend returned a different one
       if (data.session_id && data.session_id !== sessionId) {
@@ -229,28 +238,58 @@ export default function ChatScreen({
       {/* Input */}
       <form
         onSubmit={handleSubmit}
-        className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-3 border-t border-slate-700/50 bg-slate-900/30 shrink-0"
+        className="flex flex-col border-t border-slate-700/50 bg-slate-900/30 shrink-0"
         style={{ paddingBottom: "calc(0.75rem + var(--safe-area-bottom, 0px))" }}
       >
-        <button
-          type="button"
-          onClick={() => setToolSelectorOpen(true)}
-          className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-full bg-slate-700/80 flex items-center justify-center text-slate-400 hover:text-white shrink-0 touch-manipulation"
-          aria-label="Select Tool"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Message..."
-          className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 rounded-full bg-slate-800/80 border border-slate-600 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent text-base"
-          disabled={loading}
-        />
+        {/* Selected Tool Badge */}
+        {selectedTool && (
+          <div className="px-3 sm:px-4 pt-2 pb-1">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/20 border border-purple-500/50">
+              <div className="w-6 h-6 rounded bg-purple-500/30 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                </svg>
+              </div>
+              <span className="flex-1 text-sm text-purple-200 font-medium truncate">{selectedTool.name}</span>
+              <button
+                type="button"
+                onClick={() => setSelectedTool(null)}
+                className="w-5 h-5 rounded-full hover:bg-purple-500/30 flex items-center justify-center text-purple-300 hover:text-white transition-colors shrink-0"
+                aria-label="Remove tool"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+        
+        <div className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4">
+          <button
+            type="button"
+            onClick={() => setToolSelectorOpen(true)}
+            className={`w-10 h-10 min-w-[40px] min-h-[40px] rounded-full flex items-center justify-center shrink-0 touch-manipulation transition-colors ${
+              selectedTool 
+                ? "bg-purple-500/30 text-purple-400 hover:bg-purple-500/40" 
+                : "bg-slate-700/80 text-slate-400 hover:text-white"
+            }`}
+            aria-label="Select Tool"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Message..."
+            className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 rounded-full bg-slate-800/80 border border-slate-600 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent text-base"
+            disabled={loading}
+          />
         <button
           type="button"
           className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-white shrink-0 touch-manipulation"
@@ -261,26 +300,36 @@ export default function ChatScreen({
             <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
           </svg>
         </button>
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-full bg-purple-500 flex items-center justify-center text-white hover:bg-purple-400 disabled:opacity-50 shrink-0 touch-manipulation"
-          aria-label="Send"
-        >
-          <svg className="w-5 h-5 ml-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="22" y1="2" x2="11" y2="13" />
-            <polygon points="22 2 15 22 11 13 2 9 22 2" />
-          </svg>
-        </button>
+          <button
+            type="button"
+            className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-white shrink-0 touch-manipulation"
+            aria-label="Voice"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
+            </svg>
+          </button>
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-full bg-purple-500 flex items-center justify-center text-white hover:bg-purple-400 disabled:opacity-50 shrink-0 touch-manipulation"
+            aria-label="Send"
+          >
+            <svg className="w-5 h-5 ml-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
       </form>
 
       {toolSelectorOpen && (
         <ToolSelectorModal
           onClose={() => setToolSelectorOpen(false)}
           onSelectTool={(tool) => {
-            // Insert tool name into input field
-            const toolMessage = `Use tool: ${tool.name}`;
-            setInput(toolMessage);
+            // Set selected tool instead of inserting text
+            setSelectedTool({ name: tool.name, path: tool.path });
             setToolSelectorOpen(false);
           }}
         />
