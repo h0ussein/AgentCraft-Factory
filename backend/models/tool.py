@@ -35,11 +35,19 @@ def get_tool_by_id(tool_id: str | ObjectId):
 def get_tools_by_ids(tool_ids: list[str | ObjectId]) -> list[dict]:
     """
     Fetch all tools whose _id is in tool_ids. Used when loading agent's tools.
+    Skips invalid IDs so one bad entry in DB does not break agent loading.
     """
     if not tool_ids:
         return []
+    oids = []
+    for t in tool_ids:
+        try:
+            oids.append(ObjectId(t) if isinstance(t, str) else t)
+        except Exception:
+            continue
+    if not oids:
+        return []
     col = get_tool_collection()
-    oids = [ObjectId(t) if isinstance(t, str) else t for t in tool_ids]
     return list(col.find({"_id": {"$in": oids}}))
 
 

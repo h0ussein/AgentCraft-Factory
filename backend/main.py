@@ -151,6 +151,19 @@ class CreateAgentResponse(BaseModel):
     message: str = "Agent created."
 
 
+# --- Helpers ---
+
+def _validate_agent_id(agent_id: str | None) -> None:
+    """If agent_id is provided, validate it as MongoDB ObjectId; raise 400 if invalid."""
+    if not agent_id or not str(agent_id).strip():
+        return
+    try:
+        from bson import ObjectId
+        ObjectId(agent_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid agent id")
+
+
 # --- Endpoints ---
 
 @app.get("/")
@@ -189,6 +202,7 @@ def create_tool(request: CreateToolRequest):
             status_code=503,
             detail="GOOGLE_API_KEY or GEMINI_API_KEY (or GEMINI_API_KEY_SECONDARY) is not set. Add in .env",
         )
+    _validate_agent_id(request.agent_id)
     try:
         path = create_tool_file(
             user_description=request.prompt.strip(),
@@ -244,6 +258,7 @@ def chat(request: ChatRequest):
             status_code=503,
             detail="GOOGLE_API_KEY or GEMINI_API_KEY (or GEMINI_API_KEY_SECONDARY) is not set. Add in .env",
         )
+    _validate_agent_id(request.agent_id)
     try:
         response_text = run_agent_chat(
             message=request.message.strip(),
@@ -255,18 +270,26 @@ def chat(request: ChatRequest):
             response=response_text,
             session_id=request.session_id,
         )
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg.lower() or "Agent not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
 
 
 @app.get("/tools")
 def list_tools():
-    """List generated tool files."""
-    files = list_tool_files()
-    return {
-        "count": len(files),
-        "files": [{"name": p.name, "path": str(p)} for p in files],
-    }
+    """List generated tool files. Returns empty list on filesystem error (no 500)."""
+    try:
+        files = list_tool_files()
+        return {
+            "count": len(files),
+            "files": [{"name": p.name, "path": str(p)} for p in files],
+        }
+    except Exception:
+        return {"count": 0, "files": []}
 
 
 @app.get("/agents", response_model=AgentsListResponse)

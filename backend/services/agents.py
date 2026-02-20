@@ -27,11 +27,14 @@ def list_agents_from_db() -> list[dict[str, Any]]:
         for a in agents:
             aid = str(a["_id"])
             tool_ids = a.get("tools") or []
-            tool_docs = (
-                list(tools_col.find({"_id": {"$in": [ObjectId(t) for t in tool_ids]}}))
-                if tool_ids
-                else []
-            )
+            # Normalize to ObjectIds (DB may store str or ObjectId); skip invalid entries
+            oids = []
+            for t in tool_ids:
+                try:
+                    oids.append(ObjectId(t) if isinstance(t, str) else t)
+                except Exception:
+                    continue
+            tool_docs = list(tools_col.find({"_id": {"$in": oids}})) if oids else []
             result.append({
                 "id": aid,
                 "name": a.get("name") or "Unnamed Agent",

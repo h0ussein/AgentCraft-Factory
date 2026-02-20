@@ -2,7 +2,6 @@
 # MongoDB connection (Python equivalent of Mongoose connection)
 
 import os
-import ssl
 from pathlib import Path
 from dotenv import load_dotenv
 from pymongo import MongoClient

@@ -66,7 +66,10 @@ export async function createAgent(name, systemInstruction = "", modelId = "gemin
 
 export async function listTools() {
   const res = await fetch(`${API_BASE}/tools`);
-  if (!res.ok) throw new Error("Failed to list tools");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to list tools");
+  }
   return res.json();
 }
 

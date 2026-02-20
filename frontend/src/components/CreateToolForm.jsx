@@ -14,6 +14,7 @@ export default function CreateToolForm({ onClose, onSuccess }) {
   const [agentId, setAgentId] = useState("");
   const [agents, setAgents] = useState([]);
   const [loadingAgents, setLoadingAgents] = useState(true);
+  const [agentsLoadError, setAgentsLoadError] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
@@ -23,12 +24,17 @@ export default function CreateToolForm({ onClose, onSuccess }) {
     listAgents()
       .then((data) => {
         if (!cancelled) {
+          setAgentsLoadError(false);
           setAgents(data.agents || []);
           if (data.agents?.length > 0 && !agentId) setAgentId(data.agents[0].id);
         }
       })
       .catch(() => {
-        if (!cancelled) setAgents([]);
+        if (!cancelled) {
+          setAgents([]);
+          setAgentId("");
+          setAgentsLoadError(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingAgents(false);
@@ -95,7 +101,9 @@ export default function CreateToolForm({ onClose, onSuccess }) {
               disabled={loadingAgents || loading}
             >
               {loadingAgents && <option value="">Loading agents…</option>}
-              {!loadingAgents && agents.length === 0 && <option value="">No agents in database</option>}
+              {!loadingAgents && agents.length === 0 && (
+                <option value="">{agentsLoadError ? "Could not load agents" : "No agents in database"}</option>
+              )}
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
