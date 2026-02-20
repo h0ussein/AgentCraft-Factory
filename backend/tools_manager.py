@@ -114,9 +114,15 @@ Output only the function code, no markdown."""
             return response.text.strip()
         except Exception as e:
             last_error = e
-            # Retry with next key if quota exhausted and not the last key
-            if is_retryable_gemini_error(e) and idx < len(keys) - 1:
-                continue
+            # If it's a retryable error and we have more keys to try, continue to next key
+            if is_retryable_gemini_error(e):
+                if idx < len(keys) - 1:
+                    # Try next key
+                    continue
+                else:
+                    # This was the last key, raise the error
+                    raise
+            # Non-retryable error, raise immediately
             raise
     if last_error:
         raise last_error
@@ -166,9 +172,15 @@ Code:
             return False, "Safety review did not confirm SAFE."
         except Exception as e:
             last_error = e
-            # Retry with next key if quota exhausted and not the last key
-            if is_retryable_gemini_error(e) and idx < len(keys) - 1:
-                continue
+            # If it's a retryable error and we have more keys to try, continue to next key
+            if is_retryable_gemini_error(e):
+                if idx < len(keys) - 1:
+                    # Try next key
+                    continue
+                else:
+                    # This was the last key, raise the error
+                    raise
+            # Non-retryable error, raise immediately
             raise
     if last_error:
         raise last_error

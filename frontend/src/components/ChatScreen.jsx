@@ -120,7 +120,14 @@ export default function ChatScreen({
       const errorMessage = err.message || "Something went wrong";
       setError(errorMessage);
       // Show user-friendly error message in chat
-      const friendlyMessage = errorMessage.includes("capacity") || errorMessage.includes("quota") 
+      // Check for 429 status code or quota-related errors
+      const isQuotaError = errorMessage.includes("capacity") || 
+                          errorMessage.includes("quota") || 
+                          errorMessage.includes("429") ||
+                          errorMessage.includes("rate limit") ||
+                          errorMessage.includes("resource_exhausted");
+      
+      const friendlyMessage = isQuotaError
         ? "⚠️ The AI service is currently at capacity. This usually means the API quota has been exceeded. Please try again in a few moments, or contact support if the issue persists."
         : `Error: ${errorMessage}`;
       setMessages((prev) => [
@@ -290,26 +297,6 @@ export default function ChatScreen({
             className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 rounded-full bg-slate-800/80 border border-slate-600 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent text-base"
             disabled={loading}
           />
-        <button
-          type="button"
-          className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-white shrink-0 touch-manipulation"
-          aria-label="Voice"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
-          </svg>
-        </button>
-          <button
-            type="button"
-            className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-white shrink-0 touch-manipulation"
-            aria-label="Voice"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
-            </svg>
-          </button>
           <button
             type="submit"
             disabled={loading || !input.trim()}

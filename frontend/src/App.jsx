@@ -6,6 +6,7 @@ import MyAgentsScreen from "./components/MyAgentsScreen";
 import CreationModal from "./components/CreationModal";
 import CreateToolForm from "./components/CreateToolForm";
 import CreateAgentForm from "./components/CreateAgentForm";
+import AgentSelectionModal from "./components/AgentSelectionModal";
 import AdminScreen from "./components/AdminScreen";
 
 /** Admin is only at /admin (type in address bar). Not in the main nav. */
@@ -20,6 +21,7 @@ export default function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [toolFormOpen, setToolFormOpen] = useState(false);
   const [agentFormOpen, setAgentFormOpen] = useState(false);
+  const [agentSelectionModalOpen, setAgentSelectionModalOpen] = useState(false);
   const [agentsVersion, setAgentsVersion] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState(null); // { id, name } for chat
   const [currentSessionId, setCurrentSessionId] = useState(null); // null = show selector, string = show chat
@@ -51,10 +53,24 @@ export default function App() {
   };
 
   const handleCreateNewChat = () => {
+    // Check if an agent is selected
+    if (!selectedAgent) {
+      // Show agent selection modal
+      setAgentSelectionModalOpen(true);
+      return;
+    }
     // Generate a new session ID to start a fresh chat
     const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     setCurrentSessionId(newSessionId);
-    setCurrentAgentId(selectedAgent?.id || null);
+    setCurrentAgentId(selectedAgent.id);
+  };
+
+  const handleAgentSelectedFromModal = (agent) => {
+    setSelectedAgent({ id: agent.id, name: agent.name });
+    // Now create the chat with the selected agent
+    const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    setCurrentSessionId(newSessionId);
+    setCurrentAgentId(agent.id);
   };
 
   const handleBackToChatSelector = () => {
@@ -68,9 +84,19 @@ export default function App() {
     setModalOpen(false);
     setAgentFormOpen(true);
   };
-  const handleAgentCreated = () => {
-    setAgentFormOpen(false);
+  const handleAgentCreated = (newAgentData) => {
     setAgentsVersion((v) => v + 1);
+    // If agent was created from the selection modal, select it and create chat
+    if (agentSelectionModalOpen || (newAgentData && newAgentData.id)) {
+      if (newAgentData && newAgentData.id) {
+        setSelectedAgent({ id: newAgentData.id, name: newAgentData.name });
+        const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        setCurrentSessionId(newSessionId);
+        setCurrentAgentId(newAgentData.id);
+        setAgentSelectionModalOpen(false);
+      }
+    }
+    setAgentFormOpen(false);
   };
 
   if (isAdminRoute()) {
@@ -140,8 +166,22 @@ export default function App() {
 
       {agentFormOpen && (
         <CreateAgentForm
-          onClose={() => setAgentFormOpen(false)}
+          onClose={() => {
+            setAgentFormOpen(false);
+            setAgentSelectionModalOpen(false);
+          }}
           onSuccess={handleAgentCreated}
+        />
+      )}
+
+      {agentSelectionModalOpen && (
+        <AgentSelectionModal
+          onSelectAgent={handleAgentSelectedFromModal}
+          onCreateAgent={() => {
+            setAgentSelectionModalOpen(false);
+            setAgentFormOpen(true);
+          }}
+          onClose={() => setAgentSelectionModalOpen(false)}
         />
       )}
     </div>

@@ -30,11 +30,28 @@ def get_gemini_api_keys() -> list[str]:
 
 
 def is_retryable_gemini_error(exc: BaseException) -> bool:
-    """True if the error is 429 rate limit or quota/resource exhausted (try secondary key)."""
-    msg = (getattr(exc, "message", None) or str(exc)).lower()
+    """True if the error is 429 rate limit or quota/resource exhausted (try next key)."""
+    # Check for status_code attribute (common in HTTP exceptions)
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 429:
+        return True
+    
+    # Check for code attribute
     code = getattr(exc, "code", None)
     if code == 429:
         return True
+    
+    # Check error message for quota/rate limit indicators
+    msg = (getattr(exc, "message", None) or str(exc)).lower()
     if "429" in msg or "resource_exhausted" in msg or "quota" in msg or "rate limit" in msg:
         return True
+    
+    # Check for HTTPError or similar exceptions
+    if hasattr(exc, "response"):
+        response = getattr(exc, "response", None)
+        if response:
+            resp_status = getattr(response, "status_code", None)
+            if resp_status == 429:
+                return True
+    
     return False
