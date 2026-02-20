@@ -5,6 +5,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { sendChat } from "../api";
+import ToolSelectorModal from "./ToolSelectorModal";
 
 const SESSION_ID = "mobile-session-1";
 
@@ -19,6 +20,7 @@ export default function ChatScreen({ selectedAgentId = null, selectedAgentName =
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [toolSelectorOpen, setToolSelectorOpen] = useState(false);
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -139,8 +141,9 @@ export default function ChatScreen({ selectedAgentId = null, selectedAgentName =
       >
         <button
           type="button"
+          onClick={() => setToolSelectorOpen(true)}
           className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-full bg-slate-700/80 flex items-center justify-center text-slate-400 hover:text-white shrink-0 touch-manipulation"
-          aria-label="Attach"
+          aria-label="Select Tool"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -177,6 +180,18 @@ export default function ChatScreen({ selectedAgentId = null, selectedAgentName =
           </svg>
         </button>
       </form>
+
+      {toolSelectorOpen && (
+        <ToolSelectorModal
+          onClose={() => setToolSelectorOpen(false)}
+          onSelectTool={(tool) => {
+            // Insert tool name into input field
+            const toolMessage = `Use tool: ${tool.name}`;
+            setInput(toolMessage);
+            setToolSelectorOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
