@@ -2,6 +2,7 @@
 # MongoDB connection (Python equivalent of Mongoose connection)
 
 import os
+import ssl
 from pathlib import Path
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -36,6 +37,28 @@ def _get_mongo_uri() -> str:
     return (uri or "").strip()
 
 
+def _atlas_client_kwargs(uri: str) -> dict:
+    """Options for MongoDB Atlas to avoid SSL handshake errors (e.g. on Render)."""
+    kwargs = {"serverSelectionTimeoutMS": 20000}
+    if "mongodb+srv" in (uri.split("?")[0] or ""):
+        try:
+            import certifi
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.load_verify_locations(certifi.where())
+            if hasattr(ctx, "minimum_version"):
+                ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            kwargs["tls"] = True
+            kwargs["ssl_context"] = ctx
+        except Exception:
+            kwargs["tls"] = True
+            try:
+                import certifi
+                kwargs["tlsCAFile"] = certifi.where()
+            except ImportError:
+                pass
+    return kwargs
+
+
 def try_connect_mongodb() -> tuple[bool, str]:
     """
     Try to connect to MongoDB first. Call at startup.
@@ -46,7 +69,8 @@ def try_connect_mongodb() -> tuple[bool, str]:
     if not uri:
         return False, "MONGO_URI (or MONGODB_URI) not set. Put it in backend/.env"
     try:
-        client = MongoClient(uri)
+        kwargs = _atlas_client_kwargs(uri)
+        client = MongoClient(uri, **kwargs)
         db = client.get_default_database(default="agent_factory")
         db.command("ping")
         global _client, _db
@@ -71,7 +95,8 @@ def get_client() -> MongoClient:
             raise ValueError(
                 "MONGO_URI (or MONGODB_URI) is not set. Add the URI in .env"
             )
-        _client = MongoClient(uri)
+        kwargs = _atlas_client_kwargs(uri)
+        _client = MongoClient(uri, **kwargs)
     return _client
 
 

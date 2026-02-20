@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
+from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 
 # Always load .env from backend folder (no dependence on process cwd)
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -296,7 +297,13 @@ def create_agent(request: CreateAgentRequest):
         "model_id": (request.model_id or "gemini-2.5-flash").strip(),
         "tools": [],
     }
-    result = db.agents.insert_one(doc)
+    try:
+        result = db.agents.insert_one(doc)
+    except (ServerSelectionTimeoutError, ConnectionFailure) as e:
+        raise HTTPException(
+            status_code=503,
+            detail="MongoDB unavailable. Please try again later.",
+        ) from e
     return CreateAgentResponse(id=str(result.inserted_id), name=name)
 
 
@@ -333,7 +340,13 @@ def delete_agent(
         oid = ObjectId(agent_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid agent id")
-    result = db.agents.delete_one({"_id": oid})
+    try:
+        result = db.agents.delete_one({"_id": oid})
+    except (ServerSelectionTimeoutError, ConnectionFailure) as e:
+        raise HTTPException(
+            status_code=503,
+            detail="MongoDB unavailable. Please try again later.",
+        ) from e
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Agent not found")
     return {"ok": True, "message": "Agent deleted"}
