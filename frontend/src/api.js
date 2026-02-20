@@ -172,3 +172,28 @@ export async function createAdminApi(passcode, description, keyName, keyValue) {
   }
   return res.json();
 }
+
+/** List all tools (admin). Requires passcode. */
+export async function listAdminTools(passcode) {
+  const res = await fetch(`${API_BASE}/admin/tools`, {
+    headers: { "X-Admin-Passcode": passcode },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to list tools");
+  }
+  return res.json();
+}
+
+/** Delete a tool (admin). Requires passcode. */
+export async function deleteAdminTool(toolId, passcode) {
+  const res = await fetch(`${API_BASE}/admin/tools/${toolId}`, {
+    method: "DELETE",
+    headers: { "X-Admin-Passcode": passcode },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to delete tool");
+  }
+  return res.json();
+}

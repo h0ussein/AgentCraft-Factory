@@ -3,18 +3,20 @@
  */
 
 import { useState, useEffect } from "react";
-import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession, listAdminApis, createAdminApi } from "../api";
+import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession, listAdminApis, createAdminApi, listAdminTools, deleteAdminTool } from "../api";
 
 export default function AdminScreen() {
   const [passcode, setPasscode] = useState("");
   const [unlocked, setUnlocked] = useState(false);
-  const [activeTab, setActiveTab] = useState("agents"); // "agents" | "chats" | "apis"
+  const [activeTab, setActiveTab] = useState("agents"); // "agents" | "chats" | "apis" | "tools"
   const [agents, setAgents] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [apis, setApis] = useState([]);
+  const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [deletingToolId, setDeletingToolId] = useState(null);
   // APIs form
   const [apiDescription, setApiDescription] = useState("");
   const [apiKeyName, setApiKeyName] = useState("");
@@ -38,6 +40,9 @@ export default function AdminScreen() {
         } else if (activeTab === "apis") {
           const data = await listAdminApis(passcode.trim());
           if (!cancelled) setApis(data.apis || []);
+        } else if (activeTab === "tools") {
+          const data = await listAdminTools(passcode.trim());
+          if (!cancelled) setTools(data.tools || []);
         }
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -110,6 +115,19 @@ export default function AdminScreen() {
       setError(err.message || "Failed to create API");
     } finally {
       setApiSubmitting(false);
+    }
+  }
+
+  async function handleDeleteTool(toolId) {
+    setError(null);
+    setDeletingToolId(toolId);
+    try {
+      await deleteAdminTool(toolId, passcode.trim());
+      setTools((prev) => prev.filter((t) => t.id !== toolId));
+    } catch (err) {
+      setError(err.message || "Delete failed");
+    } finally {
+      setDeletingToolId(null);
     }
   }
 
@@ -211,6 +229,17 @@ export default function AdminScreen() {
             >
               APIs
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("tools")}
+              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "tools"
+                  ? "bg-amber-500 text-slate-900"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              Tools
+            </button>
           </div>
         </div>
         <button
@@ -240,7 +269,7 @@ export default function AdminScreen() {
             <section className="rounded-xl bg-slate-800/70 border border-slate-600/50 p-4">
               <h2 className="text-sm font-medium text-slate-300 mb-3">Create new API</h2>
               <p className="text-xs text-slate-500 mb-3">
-                When someone creates a tool that needs an API key, we first check these. If the required key name matches one stored here, we use it. Otherwise we try to find a public API key; if none is found, tool creation fails.
+                When someone creates a tool that needs an API key, we use two sources: (1) keys stored here (if the key name matches), and (2) an automatic search for a public/free API key for that tool. The tool is created only when every required key is found from either source.
               </p>
               <form onSubmit={handleCreateApi} className="space-y-3">
                 <div>
@@ -285,7 +314,7 @@ export default function AdminScreen() {
               </form>
             </section>
             {apis.length === 0 ? (
-              <p className="text-slate-400 text-sm">No APIs stored yet. Add one above so tool creation can use it when the key name matches.</p>
+              <p className="text-slate-400 text-sm">No APIs stored yet. You can add keys here; we also search for a public key when users create tools.</p>
             ) : (
               <ul className="space-y-2">
                 {apis.map((api) => (
@@ -298,6 +327,35 @@ export default function AdminScreen() {
               </ul>
             )}
           </div>
+        ) : activeTab === "tools" ? (
+          tools.length === 0 ? (
+            <p className="text-slate-400 text-sm">No tools to manage.</p>
+          ) : (
+            <ul className="space-y-3">
+              {tools.map((tool) => (
+                <li
+                  key={tool.id}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/70 border border-slate-600/50 p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-white truncate">{tool.name}</p>
+                    <p className="text-xs text-slate-500 truncate">{tool.file_path}</p>
+                    {tool.owner_agent_id && (
+                      <p className="text-xs text-slate-600 mt-0.5">Agent: {tool.owner_agent_id}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteTool(tool.id)}
+                    disabled={deletingToolId === tool.id}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 text-sm font-medium"
+                  >
+                    {deletingToolId === tool.id ? "Deleting…" : "Delete"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
         ) : activeTab === "agents" ? (
           agents.length === 0 ? (
             <p className="text-slate-400 text-sm">No agents to manage.</p>

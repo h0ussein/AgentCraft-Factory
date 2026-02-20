@@ -229,22 +229,19 @@ def detect_public_api_keys(user_description: str, required_keys: List[str]) -> D
     if not required_keys:
         return {}
     
-    prompt = f"""Analyze this tool description and the required API keys. If any of these APIs offer a public/free tier API key that can be used for testing, provide it.
+    prompt = f"""You must search for public or free-tier API keys that match the tool's needs.
 
 Tool description: {user_description}
 
-Required API keys: {', '.join(required_keys)}
+Required API keys (env names the tool uses): {', '.join(required_keys)}
 
-For each API key that has a public/free tier option, respond with:
-KEY_NAME: public_key_value
+Task: For each required key, if that API has a known public key, free tier key, or demo key that works for testing, provide it.
+- OpenWeatherMap: has a free tier; use a well-known demo/test key if you know one, or a placeholder like "demo" only if the API accepts it.
+- CoinGecko: often allows requests without a key or with a public base URL; if the tool needs COINGECKO_API_KEY, provide a known public/demo value if one exists.
+- Other APIs: search your knowledge for any public, free-tier, or demo key that matches the KEY_NAME.
 
-Examples:
-- OpenWeatherMap often has a free tier key like "demo_key" or a public test key
-- Some APIs provide public demo keys
-- If no public key is available, don't include that key
-
-Respond ONLY with lines in format "KEY_NAME: value" or "NONE" if no public keys are available.
-Do not include explanations, just the key-value pairs."""
+Output format: one line per key you can fill, exactly "KEY_NAME: value" (use the exact KEY_NAME from the list above). No other text.
+If you find a real public/demo key value, use it. If you truly have no public key for any of them, reply with exactly: NONE."""
     
     config = types.GenerateContentConfig(
         temperature=0.1,
@@ -265,9 +262,12 @@ Do not include explanations, just the key-value pairs."""
             if not response or not response.text:
                 return {}
             text = response.text.strip()
-            if "NONE" in text.upper() or "no public" in text.lower():
+            # Only treat as "no keys" if response is just NONE (or similar)
+            if text.upper().strip() in ("NONE", "N/A", "NONE."):
                 return {}
-            
+            if "NONE" in text.upper() and len(text.split()) <= 2:
+                return {}
+
             # Parse KEY_NAME: value pairs
             detected_keys = {}
             for line in text.split('\n'):
@@ -277,8 +277,7 @@ Do not include explanations, just the key-value pairs."""
                     if len(parts) == 2:
                         key_name = parts[0].strip()
                         key_value = parts[1].strip()
-                        # Only include if it matches one of our required keys
-                        if key_name in required_keys:
+                        if key_value and key_name in required_keys:
                             detected_keys[key_name] = key_value
             return detected_keys
         except Exception as e:

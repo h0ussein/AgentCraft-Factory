@@ -53,6 +53,42 @@ def get_tools_by_ids(tool_ids: list[str | ObjectId]) -> list[dict]:
     return list(col.find({"_id": {"$in": oids}}))
 
 
+def list_all_tools() -> list[dict]:
+    """List all tool documents for admin. Returns list of {id, name, file_path, owner_agent_id}."""
+    col = get_tool_collection()
+    out = []
+    for doc in col.find({}):
+        out.append({
+            "id": str(doc["_id"]),
+            "name": doc.get("name") or "",
+            "file_path": doc.get("file_path") or "",
+            "owner_agent_id": doc.get("owner_agent_id") or None,
+        })
+    return out
+
+
+def delete_tool_by_id(tool_id: str | ObjectId) -> tuple[bool, str | None]:
+    """
+    Delete tool document and remove its id from all agents' tools arrays.
+    Returns (success, file_path to delete from disk or None).
+    """
+    col = get_tool_collection()
+    oid = ObjectId(tool_id) if isinstance(tool_id, str) else tool_id
+    doc = col.find_one({"_id": oid})
+    if not doc:
+        return False, None
+    file_path = doc.get("file_path")
+    tool_id_str = str(doc["_id"])
+    col.delete_one({"_id": oid})
+    from config.db import get_db
+    agents_col = get_db().agents
+    agents_col.update_many(
+        {"tools": tool_id_str},
+        {"$pull": {"tools": tool_id_str}},
+    )
+    return True, file_path
+
+
 def create_tool_doc(
     name: str, 
     description: str, 

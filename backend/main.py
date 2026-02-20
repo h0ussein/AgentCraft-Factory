@@ -213,7 +213,7 @@ def create_tool(request: CreateToolRequest):
             user_description=request.prompt.strip(),
             tool_name=request.tool_name.strip() if request.tool_name else None,
         )
-        # Resolve keys: first from admin-stored APIs, then from detected public keys
+        # Resolve keys: (1) admin-stored APIs, (2) public key search (Gemini) for this tool
         resolved = {}
         try:
             from models.admin_api import get_admin_api_values_for_keys
@@ -228,49 +228,46 @@ def create_tool(request: CreateToolRequest):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "We couldn't find an API key for this tool. Required: "
+                    "We couldn't find an API key for this tool. We checked Admin APIs and searched for a public key. Required: "
                     + ", ".join(missing)
                     + ". Add them in Admin → APIs, or use a service that offers a public API."
                 ),
             )
         # All keys resolved: write file and register tool
         path = write_tool_file(code, base_name)
-        try:
-            from models.tool import create_tool_doc
-            from models.agent import get_agent_collection
-            from models.user import ensure_user, set_user_api_key
-            from bson import ObjectId
+        from models.tool import create_tool_doc
+        from models.agent import get_agent_collection
+        from models.user import ensure_user, set_user_api_key
+        from bson import ObjectId
 
-            tool_id = create_tool_doc(
-                name=path.stem,
-                description=request.prompt.strip()[:500],
-                file_path=str(path),
-                owner_agent_id=request.agent_id,
-                required_api_keys=required_api_keys,
-                public_api_keys=resolved,
+        tool_id = create_tool_doc(
+            name=path.stem,
+            description=request.prompt.strip()[:500],
+            file_path=str(path),
+            owner_agent_id=request.agent_id,
+            required_api_keys=required_api_keys,
+            public_api_keys=resolved,
+        )
+        if request.user_id:
+            try:
+                ensure_user(request.user_id)
+                for key_name, key_value in resolved.items():
+                    if key_value:
+                        set_user_api_key(request.user_id, key_name, key_value)
+            except Exception:
+                pass
+        if request.agent_id:
+            get_agent_collection().update_one(
+                {"_id": ObjectId(request.agent_id)},
+                {"$push": {"tools": tool_id}},
             )
-            if request.user_id:
-                try:
-                    ensure_user(request.user_id)
-                    for key_name, key_value in resolved.items():
-                        if key_value:
-                            set_user_api_key(request.user_id, key_name, key_value)
-                except Exception:
-                    pass
-            if request.agent_id:
+        else:
+            first = get_agent_collection().find_one()
+            if first:
                 get_agent_collection().update_one(
-                    {"_id": ObjectId(request.agent_id)},
+                    {"_id": first["_id"]},
                     {"$push": {"tools": tool_id}},
                 )
-            else:
-                first = get_agent_collection().find_one()
-                if first:
-                    get_agent_collection().update_one(
-                        {"_id": first["_id"]},
-                        {"$push": {"tools": tool_id}},
-                    )
-        except Exception:
-            pass
         message = "Tool created. You can use it in /chat."
         if resolved:
             message += " Keys used: " + ", ".join(resolved.keys()) + "."
@@ -471,6 +468,42 @@ def create_admin_api(
         return {"ok": True, "id": api_id}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        if get_db_if_connected() is None:
+            raise HTTPException(status_code=503, detail="MongoDB not connected")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api.get("/admin/tools")
+def list_admin_tools(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
+    """List all tools (from DB) for admin. Requires admin passcode."""
+    _require_admin_passcode(x_admin_passcode)
+    try:
+        from models.tool import list_all_tools
+        return {"tools": list_all_tools()}
+    except Exception as e:
+        if get_db_if_connected() is None:
+            raise HTTPException(status_code=503, detail="MongoDB not connected")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api.delete("/admin/tools/{tool_id}")
+def delete_admin_tool(
+    tool_id: str,
+    x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
+):
+    """Delete a tool (DB doc, references on agents, and file on disk). Requires admin passcode."""
+    _require_admin_passcode(x_admin_passcode)
+    try:
+        from models.tool import delete_tool_by_id
+        ok, file_path = delete_tool_by_id(tool_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        if file_path and Path(file_path).exists():
+            Path(file_path).unlink(missing_ok=True)
+        return {"ok": True, "message": "Tool deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
         if get_db_if_connected() is None:
             raise HTTPException(status_code=503, detail="MongoDB not connected")
