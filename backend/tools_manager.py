@@ -5,7 +5,7 @@ import os
 import re
 import importlib.util
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Dict, List
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -200,17 +200,111 @@ def _strip_markdown_code_block(text: str) -> str:
     return text
 
 
-def create_tool_file(user_description: str, tool_name: str | None = None) -> Path:
+def extract_api_key_requirements(code: str) -> List[str]:
+    """
+    Extract API key names from generated tool code by finding os.getenv('KEY_NAME') patterns.
+    
+    Returns:
+        List of API key names (e.g., ['OPENWEATHER_API_KEY', 'OPENAI_API_KEY'])
+    """
+    # Pattern: os.getenv('KEY_NAME') or os.getenv("KEY_NAME")
+    pattern = r'os\.getenv\(["\']([^"\']+)["\']\)'
+    matches = re.findall(pattern, code)
+    # Remove duplicates and return sorted list
+    return sorted(list(set(matches)))
+
+
+def detect_public_api_keys(user_description: str, required_keys: List[str]) -> Dict[str, str]:
+    """
+    Use Gemini to detect if any of the required API keys have public/free tier options.
+    Returns dict mapping KEY_NAME -> public_key_value if found, empty dict otherwise.
+    
+    Args:
+        user_description: Original tool description
+        required_keys: List of API key names detected from code
+        
+    Returns:
+        Dict with KEY_NAME -> public_key_value for keys that have public options
+    """
+    if not required_keys:
+        return {}
+    
+    prompt = f"""Analyze this tool description and the required API keys. If any of these APIs offer a public/free tier API key that can be used for testing, provide it.
+
+Tool description: {user_description}
+
+Required API keys: {', '.join(required_keys)}
+
+For each API key that has a public/free tier option, respond with:
+KEY_NAME: public_key_value
+
+Examples:
+- OpenWeatherMap often has a free tier key like "demo_key" or a public test key
+- Some APIs provide public demo keys
+- If no public key is available, don't include that key
+
+Respond ONLY with lines in format "KEY_NAME: value" or "NONE" if no public keys are available.
+Do not include explanations, just the key-value pairs."""
+    
+    config = types.GenerateContentConfig(
+        temperature=0.1,
+        max_output_tokens=512,
+    )
+    keys = get_gemini_api_keys()
+    last_error = None
+    for idx, api_key in enumerate(keys):
+        if not api_key:
+            continue
+        try:
+            client = genai.Client(api_key=api_key.strip())
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=config,
+            )
+            if not response or not response.text:
+                return {}
+            text = response.text.strip()
+            if "NONE" in text.upper() or "no public" in text.lower():
+                return {}
+            
+            # Parse KEY_NAME: value pairs
+            detected_keys = {}
+            for line in text.split('\n'):
+                line = line.strip()
+                if ':' in line and not line.startswith('#'):
+                    parts = line.split(':', 1)
+                    if len(parts) == 2:
+                        key_name = parts[0].strip()
+                        key_value = parts[1].strip()
+                        # Only include if it matches one of our required keys
+                        if key_name in required_keys:
+                            detected_keys[key_name] = key_value
+            return detected_keys
+        except Exception as e:
+            last_error = e
+            if is_retryable_gemini_error(e):
+                if idx < len(keys) - 1:
+                    continue
+                else:
+                    break
+            # Non-retryable error, return empty
+            break
+    return {}
+
+
+def create_tool_file(user_description: str, tool_name: str | None = None) -> Tuple[Path, Dict[str, str]]:
     """
     Generate a Python tool from the user's description and save it under custom_tools/.
     Includes a Safety Review step: Gemini checks the generated code for malicious patterns before saving.
+    Also extracts API key requirements and detects public API keys if available.
 
     Args:
         user_description: What the tool should do (natural language).
         tool_name: Optional base name for the file (e.g. 'weather'). If None, derived from description.
 
     Returns:
-        Path to the saved .py file.
+        Tuple of (Path to saved .py file, Dict of detected public API keys {KEY_NAME: value})
 
     Raises:
         ValueError: If generation fails, safety review fails, or API key is missing.
@@ -226,6 +320,14 @@ def create_tool_file(user_description: str, tool_name: str | None = None) -> Pat
             "Safety review failed: generated code contains forbidden patterns."
         )
 
+    # Extract API key requirements from code
+    required_keys = extract_api_key_requirements(code)
+    
+    # Try to detect public API keys if any are required
+    public_keys = {}
+    if required_keys:
+        public_keys = detect_public_api_keys(user_description, required_keys)
+
     base = _sanitize_tool_name(tool_name) if tool_name else _sanitize_filename(user_description)
     # Ensure we have a unique .py file
     path = CUSTOM_TOOLS_DIR / f"{base}.py"
@@ -234,7 +336,7 @@ def create_tool_file(user_description: str, tool_name: str | None = None) -> Pat
         counter += 1
         path = CUSTOM_TOOLS_DIR / f"{base}_{counter}.py"
     path.write_text(code, encoding="utf-8")
-    return path
+    return path, public_keys
 
 
 def list_tool_files() -> list[Path]:

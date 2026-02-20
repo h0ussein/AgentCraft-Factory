@@ -17,7 +17,7 @@ from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # Import tools manager and agent factory
-from tools_manager import create_tool_file, list_tool_files
+from tools_manager import create_tool_file, list_tool_files, extract_api_key_requirements
 from agent_factory import run_agent_chat
 from config.db import get_db_if_connected
 from config.gemini_keys import get_gemini_api_keys
@@ -202,21 +202,40 @@ def create_tool(request: CreateToolRequest):
             detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
         )
     try:
-        path = create_tool_file(
+        path, public_api_keys = create_tool_file(
             user_description=request.prompt.strip(),
             tool_name=request.tool_name.strip() if request.tool_name else None,
         )
+        
+        # Extract API key requirements from the generated code
+        code = path.read_text(encoding="utf-8")
+        required_api_keys = extract_api_key_requirements(code)
+        
         # Optionally register tool in MongoDB and link to agent
         try:
             from models.tool import create_tool_doc
             from models.agent import get_agent_collection
+            from models.user import ensure_user, set_user_api_key
             from bson import ObjectId
+            
             tool_id = create_tool_doc(
                 name=path.stem,
                 description=request.prompt.strip()[:500],
                 file_path=str(path),
                 owner_agent_id=request.agent_id,
+                required_api_keys=required_api_keys,
+                public_api_keys=public_api_keys,
             )
+            
+            # If public API keys were detected and user_id is provided, auto-add them to user settings
+            if public_api_keys and request.user_id:
+                try:
+                    ensure_user(request.user_id)
+                    for key_name, key_value in public_api_keys.items():
+                        set_user_api_key(request.user_id, key_name, key_value)
+                except Exception:
+                    pass  # Graceful failure if user storage fails
+            
             if request.agent_id:
                 get_agent_collection().update_one(
                     {"_id": ObjectId(request.agent_id)},
@@ -232,9 +251,19 @@ def create_tool(request: CreateToolRequest):
                     )
         except Exception:
             pass
+        
+        # Build success message with API key info
+        message = "Tool created. You can use it in /chat."
+        if public_api_keys:
+            key_names = ", ".join(public_api_keys.keys())
+            message += f" Detected public API keys: {key_names}."
+        elif required_api_keys:
+            key_names = ", ".join(required_api_keys)
+            message += f" Required API keys: {key_names}."
+        
         return CreateToolResponse(
             success=True,
-            message="Tool created. You can use it in /chat.",
+            message=message,
             file_path=str(path),
             file_name=path.name,
         )
