@@ -46,6 +46,9 @@ def _atlas_client_kwargs(uri: str) -> dict:
             kwargs["tlsCAFile"] = certifi.where()
         except ImportError:
             pass
+        # Optional: relax TLS verification if handshake still fails on some hosts (e.g. Render). Set MONGO_TLS_INSECURE=1 in env.
+        if (os.getenv("MONGO_TLS_INSECURE") or "").strip() in ("1", "true", "yes"):
+            kwargs["tlsAllowInvalidCertificates"] = True
     return kwargs
 
 

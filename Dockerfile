@@ -7,8 +7,12 @@ COPY frontend/ .
 RUN npm run build
 
 # Stage 2: run Python backend + serve built frontend
-FROM python:3.12-slim
+# Use full python image for more complete OpenSSL/CA stack (avoids Atlas TLS handshake issues on Render)
+FROM python:3.12
 WORKDIR /app
+
+# Ensure up-to-date CA certificates for MongoDB Atlas TLS
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy backend
 COPY backend/ ./backend/
