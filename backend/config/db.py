@@ -37,24 +37,15 @@ def _get_mongo_uri() -> str:
 
 
 def _atlas_client_kwargs(uri: str) -> dict:
-    """Options for MongoDB Atlas to avoid SSL handshake errors (e.g. on Render)."""
+    """Options for MongoDB Atlas (certifi CA bundle). PyMongo does not support ssl_context."""
     kwargs = {"serverSelectionTimeoutMS": 20000}
     if "mongodb+srv" in (uri.split("?")[0] or ""):
+        kwargs["tls"] = True
         try:
             import certifi
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ctx.load_verify_locations(certifi.where())
-            if hasattr(ctx, "minimum_version"):
-                ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-            kwargs["tls"] = True
-            kwargs["ssl_context"] = ctx
-        except Exception:
-            kwargs["tls"] = True
-            try:
-                import certifi
-                kwargs["tlsCAFile"] = certifi.where()
-            except ImportError:
-                pass
+            kwargs["tlsCAFile"] = certifi.where()
+        except ImportError:
+            pass
     return kwargs
 
 
