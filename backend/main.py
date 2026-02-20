@@ -198,7 +198,7 @@ def create_tool(request: CreateToolRequest):
     if not get_gemini_api_keys():
         raise HTTPException(
             status_code=503,
-            detail="GOOGLE_API_KEY or GEMINI_API_KEY (or GEMINI_API_KEY_SECONDARY) is not set. Add in .env",
+            detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
         )
     try:
         path = create_tool_file(
@@ -253,7 +253,7 @@ def chat(request: ChatRequest):
     if not get_gemini_api_keys():
         raise HTTPException(
             status_code=503,
-            detail="GOOGLE_API_KEY or GEMINI_API_KEY (or GEMINI_API_KEY_SECONDARY) is not set. Add in .env",
+            detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
         )
     try:
         response_text = run_agent_chat(

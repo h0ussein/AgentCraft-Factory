@@ -1,5 +1,5 @@
 # config/gemini_keys.py
-# Primary + secondary Gemini API keys; retry with secondary on 429 / quota exhausted.
+# Primary + secondary + third Gemini API keys; retry with next key on 429 / quota exhausted.
 
 import os
 
@@ -13,15 +13,19 @@ load_dotenv(_ENV_PATH)
 def get_gemini_api_keys() -> list[str]:
     """
     Return API keys in order: primary (GOOGLE_API_KEY or GEMINI_API_KEY), then
-    secondary (GEMINI_API_KEY_SECONDARY) if set. Used to fallback on 429/quota.
+    secondary (GEMINI_API_KEY_SECONDARY), then third (GEMINI_API_KEY_THIRD) if set.
+    Used to fallback on 429/quota exhausted.
     """
     primary = (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
     secondary = (os.getenv("GEMINI_API_KEY_SECONDARY") or "").strip()
+    third = (os.getenv("GEMINI_API_KEY_THIRD") or "").strip()
     keys = []
     if primary:
         keys.append(primary)
     if secondary and secondary != primary:
         keys.append(secondary)
+    if third and third != primary and third != secondary:
+        keys.append(third)
     return keys
 
 

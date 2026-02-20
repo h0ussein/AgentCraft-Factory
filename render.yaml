@@ -2,7 +2,7 @@ services:
   - type: web
     name: my-ai-project
     env: python
-    buildCommand: cd frontend && npm install && npm run build && cd .. && pip install -r backend/requirements.txt
+    buildCommand: cd frontend && NODE_ENV=development npm install && npm run build && cd .. && pip install -r backend/requirements.txt
     startCommand: cd backend && python run_server.py
     envVars:
       - key: PORT
