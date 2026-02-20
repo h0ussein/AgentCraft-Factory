@@ -62,9 +62,9 @@ class ProductionRedirectMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         host = request.headers.get("host", "")
         proto = request.headers.get("x-forwarded-proto", request.scope.get("scheme", "http"))
-        url = request.url.path
-        if request.query_string:
-            url = f"{url}?{request.query_string}"
+        path = request.url.path
+        query = (request.url.query or "").strip()
+        url = f"{path}?{query}" if query else path
         if proto == "http":
             return RedirectResponse(url=f"https://{host}{url}", status_code=301)
         if host.startswith("www."):
