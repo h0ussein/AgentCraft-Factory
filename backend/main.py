@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
@@ -51,9 +51,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Production: same server serves API + built frontend (like MERN setup)
+# Same server serves API + built frontend (localhost:8000 and production)
 IS_PRODUCTION = os.getenv("NODE_ENV") == "production" or os.getenv("ENV") == "production"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+HAS_FRONTEND_BUILD = FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists()
+
+# API under /api so SPA routes like /agents can be served as index.html
+api = APIRouter()
 
 
 class ProductionRedirectMiddleware(BaseHTTPMiddleware):
@@ -75,14 +79,20 @@ class ProductionRedirectMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(ProductionRedirectMiddleware)
-# CORS: allow all in dev; in production frontend is same origin
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS: only in development (frontend on different port); production = same origin, no CORS
+if not IS_PRODUCTION:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # --- Request/Response models ---
@@ -151,25 +161,12 @@ class CreateAgentResponse(BaseModel):
     message: str = "Agent created."
 
 
-# --- Helpers ---
-
-def _validate_agent_id(agent_id: str | None) -> None:
-    """If agent_id is provided, validate it as MongoDB ObjectId; raise 400 if invalid."""
-    if not agent_id or not str(agent_id).strip():
-        return
-    try:
-        from bson import ObjectId
-        ObjectId(agent_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid agent id")
-
-
 # --- Endpoints ---
 
 @app.get("/")
 def root():
-    """Health/root endpoint. In production with frontend built, / serves SPA (see serve_spa below)."""
-    if IS_PRODUCTION and FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
+    """Serve frontend SPA when built; else API info."""
+    if HAS_FRONTEND_BUILD:
         return FileResponse(str(FRONTEND_DIST / "index.html"))
     return {
         "app": "Dynamic AI Agent Factory",
@@ -180,17 +177,18 @@ def root():
             "POST /chat": "Send a message to the dynamic agent and get a response",
             "GET /tools": "List generated tool files",
         },
+        "hint": "Run: npm run build (in project root) then restart backend. Or: npm run serve",
     }
 
 
-@app.get("/health")
+@api.get("/health")
 def health():
     """Health check; lists registered route paths so you can confirm /agents is loaded."""
     routes = [r.path for r in app.routes if hasattr(r, "path") and r.path.startswith("/")]
     return {"status": "ok", "routes": sorted(routes)}
 
 
-@app.post("/create-tool", response_model=CreateToolResponse)
+@api.post("/create-tool", response_model=CreateToolResponse)
 def create_tool(request: CreateToolRequest):
     """
     Generate a new Python tool from a natural language description using Gemini 2.5 Flash.
@@ -202,7 +200,6 @@ def create_tool(request: CreateToolRequest):
             status_code=503,
             detail="GOOGLE_API_KEY or GEMINI_API_KEY (or GEMINI_API_KEY_SECONDARY) is not set. Add in .env",
         )
-    _validate_agent_id(request.agent_id)
     try:
         path = create_tool_file(
             user_description=request.prompt.strip(),
@@ -246,7 +243,7 @@ def create_tool(request: CreateToolRequest):
         raise HTTPException(status_code=500, detail=f"Tool generation failed: {e}")
 
 
-@app.post("/chat", response_model=ChatResponse)
+@api.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     """
     Send a message to the dynamic agent. The agent uses all loaded tools from custom_tools/.
@@ -258,7 +255,6 @@ def chat(request: ChatRequest):
             status_code=503,
             detail="GOOGLE_API_KEY or GEMINI_API_KEY (or GEMINI_API_KEY_SECONDARY) is not set. Add in .env",
         )
-    _validate_agent_id(request.agent_id)
     try:
         response_text = run_agent_chat(
             message=request.message.strip(),
@@ -270,29 +266,21 @@ def chat(request: ChatRequest):
             response=response_text,
             session_id=request.session_id,
         )
-    except ValueError as e:
-        msg = str(e)
-        if "not found" in msg.lower() or "Agent not found" in msg:
-            raise HTTPException(status_code=404, detail=msg)
-        raise HTTPException(status_code=400, detail=msg)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
 
 
-@app.get("/tools")
+@api.get("/tools")
 def list_tools():
-    """List generated tool files. Returns empty list on filesystem error (no 500)."""
-    try:
-        files = list_tool_files()
-        return {
-            "count": len(files),
-            "files": [{"name": p.name, "path": str(p)} for p in files],
-        }
-    except Exception:
-        return {"count": 0, "files": []}
+    """List generated tool files."""
+    files = list_tool_files()
+    return {
+        "count": len(files),
+        "files": [{"name": p.name, "path": str(p)} for p in files],
+    }
 
 
-@app.get("/agents", response_model=AgentsListResponse)
+@api.get("/agents", response_model=AgentsListResponse)
 def list_agents():
     """
     List all agents from DB with their attached tools.
@@ -302,7 +290,7 @@ def list_agents():
     return AgentsListResponse(agents=agents, count=len(agents))
 
 
-@app.post("/agents", response_model=CreateAgentResponse)
+@api.post("/agents", response_model=CreateAgentResponse)
 def create_agent(request: CreateAgentRequest):
     """Create a new agent. Uses the same DB connection as startup."""
     db = get_db_if_connected()
@@ -330,7 +318,7 @@ def create_agent(request: CreateAgentRequest):
     return CreateAgentResponse(id=str(result.inserted_id), name=name)
 
 
-@app.get("/admin/verify")
+@api.get("/admin/verify")
 def admin_verify(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
     """Verify admin passcode. Returns 200 if correct, 403 if wrong. Used to unlock Admin UI."""
     admin_passcode = (os.getenv("ADMIN_PASSCODE") or "").strip()
@@ -341,7 +329,7 @@ def admin_verify(x_admin_passcode: str | None = Header(None, alias="X-Admin-Pass
     return {"ok": True}
 
 
-@app.delete("/agents/{agent_id}")
+@api.delete("/agents/{agent_id}")
 def delete_agent(
     agent_id: str,
     x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
@@ -375,17 +363,17 @@ def delete_agent(
     return {"ok": True, "message": "Agent deleted"}
 
 
-# --- Production: serve built frontend (static + SPA fallback) ---
-if IS_PRODUCTION and FRONTEND_DIST.exists():
+app.include_router(api, prefix="/api")
+
+# --- Serve built frontend (static + SPA fallback) when frontend/dist exists ---
+if HAS_FRONTEND_BUILD:
     assets_dir = FRONTEND_DIST / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-    index_path = FRONTEND_DIST / "index.html"
-    if index_path.exists():
-        @app.get("/{full_path:path}")
-        def serve_spa(full_path: str):
-            """Serve index.html for non-API paths (e.g. /admin) so SPA routing works."""
-            return FileResponse(str(index_path))
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        """Serve index.html for non-API paths so SPA routing works."""
+        return FileResponse(str(FRONTEND_DIST / "index.html"))
 
 
 # Run server from backend folder: uvicorn main:app --reload

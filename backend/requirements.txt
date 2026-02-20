@@ -1,5 +1,4 @@
 agno
-certifi
 python-dotenv
 fastapi
 uvicorn

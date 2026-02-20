@@ -1,15 +1,18 @@
-# Render Blueprint: use this so Render creates a DOCKER service (not Node).
-# Deploy: connect repo and use "New Blueprint Instance", or create a new Web Service
-# and set Language to "Docker" when asked.
-
 services:
   - type: web
-    name: agentcraft-factory
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    name: my-ai-project
+    env: python
+    buildCommand: cd frontend && npm install && npm run build && cd .. && pip install -r backend/requirements.txt
+    startCommand: cd backend && python run_server.py
     envVars:
+      - key: PORT
+        value: 8000
       - key: NODE_ENV
         value: production
-      - key: PORT
-        generateValue: true
-    # Add your secrets in Render Dashboard: MONGO_URI, GOOGLE_API_KEY or GEMINI_API_KEY, ADMIN_PASSCODE
+      - key: ENV
+        value: production
+    # Add your .env variables in Render dashboard:
+    # - MONGO_URI
+    # - GOOGLE_API_KEY
+    # - GEMINI_API_KEY_SECONDARY (optional)
+    # - ADMIN_PASSCODE

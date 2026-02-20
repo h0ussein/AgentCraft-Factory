@@ -1,8 +1,8 @@
 /**
  * API client for Dynamic AI Agent Factory backend
- * In production the same server serves frontend + API, so use relative URL.
+ * Same server serves frontend + API at /api (so SPA routes like /agents work).
  */
-const API_BASE = import.meta.env.PROD ? "" : "http://localhost:8000";
+const API_BASE = import.meta.env.PROD ? "/api" : "http://localhost:8000/api";
 
 export async function sendChat(message, sessionId = null, agentId = null) {
   const res = await fetch(`${API_BASE}/chat`, {

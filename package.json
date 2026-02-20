@@ -1,15 +1,9 @@
 {
   "name": "my_ai-project",
-  "version": "1.0.0",
-  "description": "Dynamic AI Agent Factory – Python backend + React frontend",
   "private": true,
   "scripts": {
-    "build": "npm install --prefix frontend --include=dev && npm run build --prefix frontend",
-    "start": "python backend/run_server.py",
-    "dev:backend": "python backend/run_server.py",
-    "dev:frontend": "npm run dev --prefix frontend"
-  },
-  "engines": {
-    "node": ">=18"
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && python run_server.py",
+    "serve": "npm run build && npm run start"
   }
 }
