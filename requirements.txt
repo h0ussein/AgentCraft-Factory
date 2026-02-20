@@ -1,0 +1,6 @@
+# Dynamic AI Agent Factory
+agno
+python-dotenv
+fastapi
+uvicorn
+google-genai
