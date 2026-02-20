@@ -17,7 +17,13 @@ from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # Import tools manager and agent factory
-from tools_manager import create_tool_file, list_tool_files, extract_api_key_requirements
+from tools_manager import (
+    create_tool_file,
+    list_tool_files,
+    extract_api_key_requirements,
+    generate_tool_code_and_keys,
+    write_tool_file,
+)
 from agent_factory import run_agent_chat
 from config.db import get_db_if_connected
 from config.gemini_keys import get_gemini_api_keys
@@ -192,7 +198,8 @@ def health():
 @api.post("/create-tool", response_model=CreateToolResponse)
 def create_tool(request: CreateToolRequest):
     """
-    Generate a new Python tool from a natural language description using Gemini 2.5 Flash.
+    Generate a new Python tool only if every required API key is available:
+    from Admin-stored APIs or from a detected public API. Otherwise returns 400.
     """
     if not request.prompt or not request.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is required.")
@@ -202,47 +209,60 @@ def create_tool(request: CreateToolRequest):
             detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
         )
     try:
-        path, public_api_keys = create_tool_file(
+        code, base_name, required_api_keys, public_api_keys = generate_tool_code_and_keys(
             user_description=request.prompt.strip(),
             tool_name=request.tool_name.strip() if request.tool_name else None,
         )
-        
-        # Extract API key requirements from the generated code
-        code = path.read_text(encoding="utf-8")
-        required_api_keys = extract_api_key_requirements(code)
-        
-        # Optionally register tool in MongoDB and link to agent
+        # Resolve keys: first from admin-stored APIs, then from detected public keys
+        resolved = {}
+        try:
+            from models.admin_api import get_admin_api_values_for_keys
+            resolved = get_admin_api_values_for_keys(required_api_keys)
+        except Exception:
+            pass
+        for k in required_api_keys:
+            if k not in resolved or not resolved[k]:
+                resolved[k] = (public_api_keys.get(k) or "").strip() or None
+        missing = [k for k in required_api_keys if not resolved.get(k)]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "We couldn't find an API key for this tool. Required: "
+                    + ", ".join(missing)
+                    + ". Add them in Admin → APIs, or use a service that offers a public API."
+                ),
+            )
+        # All keys resolved: write file and register tool
+        path = write_tool_file(code, base_name)
         try:
             from models.tool import create_tool_doc
             from models.agent import get_agent_collection
             from models.user import ensure_user, set_user_api_key
             from bson import ObjectId
-            
+
             tool_id = create_tool_doc(
                 name=path.stem,
                 description=request.prompt.strip()[:500],
                 file_path=str(path),
                 owner_agent_id=request.agent_id,
                 required_api_keys=required_api_keys,
-                public_api_keys=public_api_keys,
+                public_api_keys=resolved,
             )
-            
-            # If public API keys were detected and user_id is provided, auto-add them to user settings
-            if public_api_keys and request.user_id:
+            if request.user_id:
                 try:
                     ensure_user(request.user_id)
-                    for key_name, key_value in public_api_keys.items():
-                        set_user_api_key(request.user_id, key_name, key_value)
+                    for key_name, key_value in resolved.items():
+                        if key_value:
+                            set_user_api_key(request.user_id, key_name, key_value)
                 except Exception:
-                    pass  # Graceful failure if user storage fails
-            
+                    pass
             if request.agent_id:
                 get_agent_collection().update_one(
                     {"_id": ObjectId(request.agent_id)},
                     {"$push": {"tools": tool_id}},
                 )
             else:
-                # Add to default agent (first one)
                 first = get_agent_collection().find_one()
                 if first:
                     get_agent_collection().update_one(
@@ -251,26 +271,20 @@ def create_tool(request: CreateToolRequest):
                     )
         except Exception:
             pass
-        
-        # Build success message with API key info
         message = "Tool created. You can use it in /chat."
-        if public_api_keys:
-            key_names = ", ".join(public_api_keys.keys())
-            message += f" Detected public API keys: {key_names}."
-        elif required_api_keys:
-            key_names = ", ".join(required_api_keys)
-            message += f" Required API keys: {key_names}."
-        
+        if resolved:
+            message += " Keys used: " + ", ".join(resolved.keys()) + "."
         return CreateToolResponse(
             success=True,
             message=message,
             file_path=str(path),
             file_name=path.name,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        # Check if it's a quota/rate limit error
         from config.gemini_keys import is_retryable_gemini_error
         if is_retryable_gemini_error(e):
             raise HTTPException(
@@ -404,15 +418,63 @@ def create_agent(request: CreateAgentRequest):
     return CreateAgentResponse(id=str(result.inserted_id), name=name)
 
 
-@api.get("/admin/verify")
-def admin_verify(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
-    """Verify admin passcode. Returns 200 if correct, 403 if wrong. Used to unlock Admin UI."""
+def _require_admin_passcode(x_admin_passcode: str | None) -> None:
+    """Raise 403 if passcode missing or wrong, 503 if ADMIN_PASSCODE not set."""
     admin_passcode = (os.getenv("ADMIN_PASSCODE") or "").strip()
     if not admin_passcode:
         raise HTTPException(status_code=503, detail="ADMIN_PASSCODE not set in .env")
     if not x_admin_passcode or x_admin_passcode.strip() != admin_passcode:
         raise HTTPException(status_code=403, detail="Invalid admin passcode")
+
+
+@api.get("/admin/verify")
+def admin_verify(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
+    """Verify admin passcode. Returns 200 if correct, 403 if wrong. Used to unlock Admin UI."""
+    _require_admin_passcode(x_admin_passcode)
     return {"ok": True}
+
+
+class CreateAdminApiRequest(BaseModel):
+    """Request body for POST /admin/apis"""
+    description: str = Field("", description="What this API is for (e.g. OpenWeatherMap for weather)")
+    key_name: str = Field(..., description="Env key name tools use, e.g. OPENWEATHER_API_KEY")
+    key_value: str = Field(..., description="The API key value")
+
+
+@api.get("/admin/apis")
+def list_admin_apis(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
+    """List admin-defined APIs (for tool creation). Requires admin passcode."""
+    _require_admin_passcode(x_admin_passcode)
+    try:
+        from models.admin_api import list_admin_apis as _list
+        return {"apis": _list()}
+    except Exception as e:
+        if get_db_if_connected() is None:
+            raise HTTPException(status_code=503, detail="MongoDB not connected")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api.post("/admin/apis")
+def create_admin_api(
+    request: CreateAdminApiRequest,
+    x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
+):
+    """Create or update an admin-defined API key. Used when users create tools that need this key."""
+    _require_admin_passcode(x_admin_passcode)
+    try:
+        from models.admin_api import create_admin_api as _create
+        api_id = _create(
+            description=request.description.strip(),
+            key_name=request.key_name.strip(),
+            key_value=request.key_value.strip(),
+        )
+        return {"ok": True, "id": api_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        if get_db_if_connected() is None:
+            raise HTTPException(status_code=503, detail="MongoDB not connected")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @api.delete("/agents/{agent_id}")
@@ -421,14 +483,7 @@ def delete_agent(
     x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
 ):
     """Delete an agent and all related chat sessions. Requires X-Admin-Passcode header to match ADMIN_PASSCODE in .env."""
-    admin_passcode = (os.getenv("ADMIN_PASSCODE") or "").strip()
-    if not admin_passcode:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin delete not configured. Set ADMIN_PASSCODE in .env",
-        )
-    if not x_admin_passcode or x_admin_passcode.strip() != admin_passcode:
-        raise HTTPException(status_code=403, detail="Invalid admin passcode")
+    _require_admin_passcode(x_admin_passcode)
     db = get_db_if_connected()
     if db is None:
         raise HTTPException(status_code=503, detail="MongoDB not connected")
@@ -463,14 +518,7 @@ def delete_session_endpoint(
     x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
 ):
     """Delete a chat session. Requires X-Admin-Passcode header to match ADMIN_PASSCODE in .env."""
-    admin_passcode = (os.getenv("ADMIN_PASSCODE") or "").strip()
-    if not admin_passcode:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin delete not configured. Set ADMIN_PASSCODE in .env",
-        )
-    if not x_admin_passcode or x_admin_passcode.strip() != admin_passcode:
-        raise HTTPException(status_code=403, detail="Invalid admin passcode")
+    _require_admin_passcode(x_admin_passcode)
     db = get_db_if_connected()
     if db is None:
         raise HTTPException(status_code=503, detail="MongoDB not connected")

@@ -139,3 +139,36 @@ export async function deleteSession(sessionId, agentId = null, passcode) {
   }
   return res.json();
 }
+
+/** List admin-defined APIs (for tool creation). Requires passcode. */
+export async function listAdminApis(passcode) {
+  const res = await fetch(`${API_BASE}/admin/apis`, {
+    headers: { "X-Admin-Passcode": passcode },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to list APIs");
+  }
+  return res.json();
+}
+
+/** Create or update an admin API (description, key_name, key_value). Requires passcode. */
+export async function createAdminApi(passcode, description, keyName, keyValue) {
+  const res = await fetch(`${API_BASE}/admin/apis`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Admin-Passcode": passcode,
+    },
+    body: JSON.stringify({
+      description: description.trim(),
+      key_name: keyName.trim(),
+      key_value: keyValue.trim(),
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to create API");
+  }
+  return res.json();
+}

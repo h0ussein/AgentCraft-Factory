@@ -339,6 +339,41 @@ def create_tool_file(user_description: str, tool_name: str | None = None) -> Tup
     return path, public_keys
 
 
+def generate_tool_code_and_keys(user_description: str, tool_name: str | None = None) -> Tuple[str, str, List[str], Dict[str, str]]:
+    """
+    Generate tool code, run safety review, extract required API keys, and detect public keys.
+    Does NOT write any file. Caller must resolve keys (admin + public) and then call write_tool_file if all resolved.
+
+    Returns:
+        (code, base_name, required_keys, public_keys)
+    """
+    code = generate_tool_code(user_description)
+    code = _strip_markdown_code_block(code)
+    is_safe, safety_message = _safety_review_generated_code(code)
+    if not is_safe:
+        raise ValueError(
+            f"Safety review failed. The generated code was rejected: {safety_message}. "
+            "Safety review failed: generated code contains forbidden patterns."
+        )
+    required_keys = extract_api_key_requirements(code)
+    public_keys = {}
+    if required_keys:
+        public_keys = detect_public_api_keys(user_description, required_keys)
+    base = _sanitize_tool_name(tool_name) if tool_name else _sanitize_filename(user_description)
+    return code, base, required_keys, public_keys
+
+
+def write_tool_file(code: str, base_name: str) -> Path:
+    """Write code to a new file under custom_tools/ with unique name. Returns path."""
+    path = CUSTOM_TOOLS_DIR / f"{base_name}.py"
+    counter = 0
+    while path.exists():
+        counter += 1
+        path = CUSTOM_TOOLS_DIR / f"{base_name}_{counter}.py"
+    path.write_text(code, encoding="utf-8")
+    return path
+
+
 def list_tool_files() -> list[Path]:
     """List all .py files in custom_tools/ (excluding __init__)."""
     return [p for p in CUSTOM_TOOLS_DIR.glob("*.py") if p.name != "__init__.py"]

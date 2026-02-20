@@ -3,32 +3,41 @@
  */
 
 import { useState, useEffect } from "react";
-import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession } from "../api";
+import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession, listAdminApis, createAdminApi } from "../api";
 
 export default function AdminScreen() {
   const [passcode, setPasscode] = useState("");
   const [unlocked, setUnlocked] = useState(false);
-  const [activeTab, setActiveTab] = useState("agents"); // "agents" or "chats"
+  const [activeTab, setActiveTab] = useState("agents"); // "agents" | "chats" | "apis"
   const [agents, setAgents] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [apis, setApis] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  // APIs form
+  const [apiDescription, setApiDescription] = useState("");
+  const [apiKeyName, setApiKeyName] = useState("");
+  const [apiKeyValue, setApiKeyValue] = useState("");
+  const [apiSubmitting, setApiSubmitting] = useState(false);
 
   useEffect(() => {
     if (!unlocked) return;
     setLoading(true);
     setError(null);
     let cancelled = false;
-    
+
     const loadData = async () => {
       try {
         if (activeTab === "agents") {
           const data = await listAgents();
           if (!cancelled) setAgents(data.agents || []);
-        } else {
+        } else if (activeTab === "chats") {
           const data = await listSessions();
           if (!cancelled) setSessions(data.sessions || []);
+        } else if (activeTab === "apis") {
+          const data = await listAdminApis(passcode.trim());
+          if (!cancelled) setApis(data.apis || []);
         }
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -36,10 +45,10 @@ export default function AdminScreen() {
         if (!cancelled) setLoading(false);
       }
     };
-    
+
     loadData();
     return () => { cancelled = true; };
-  }, [unlocked, activeTab]);
+  }, [unlocked, activeTab, passcode]);
 
   async function handleUnlock(e) {
     e.preventDefault();
@@ -82,6 +91,25 @@ export default function AdminScreen() {
       setError(err.message || "Delete failed");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function handleCreateApi(e) {
+    e.preventDefault();
+    if (!apiKeyName.trim() || !apiKeyValue.trim()) return;
+    setError(null);
+    setApiSubmitting(true);
+    try {
+      await createAdminApi(passcode.trim(), apiDescription, apiKeyName, apiKeyValue);
+      setApiDescription("");
+      setApiKeyName("");
+      setApiKeyValue("");
+      const data = await listAdminApis(passcode.trim());
+      setApis(data.apis || []);
+    } catch (err) {
+      setError(err.message || "Failed to create API");
+    } finally {
+      setApiSubmitting(false);
     }
   }
 
@@ -172,6 +200,17 @@ export default function AdminScreen() {
             >
               Chats
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("apis")}
+              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "apis"
+                  ? "bg-amber-500 text-slate-900"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              APIs
+            </button>
           </div>
         </div>
         <button
@@ -195,6 +234,69 @@ export default function AdminScreen() {
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "150ms" }} />
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
+          </div>
+        ) : activeTab === "apis" ? (
+          <div className="space-y-6">
+            <section className="rounded-xl bg-slate-800/70 border border-slate-600/50 p-4">
+              <h2 className="text-sm font-medium text-slate-300 mb-3">Create new API</h2>
+              <p className="text-xs text-slate-500 mb-3">
+                When someone creates a tool that needs an API key, we first check these. If the required key name matches one stored here, we use it. Otherwise we try to find a public API key; if none is found, tool creation fails.
+              </p>
+              <form onSubmit={handleCreateApi} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Description (e.g. OpenWeatherMap for weather)</label>
+                  <input
+                    type="text"
+                    value={apiDescription}
+                    onChange={(e) => setApiDescription(e.target.value)}
+                    placeholder="What this API is for"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Key name (e.g. OPENWEATHER_API_KEY) *</label>
+                  <input
+                    type="text"
+                    value={apiKeyName}
+                    onChange={(e) => setApiKeyName(e.target.value)}
+                    placeholder="OPENWEATHER_API_KEY"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Key value *</label>
+                  <input
+                    type="password"
+                    value={apiKeyValue}
+                    onChange={(e) => setApiKeyValue(e.target.value)}
+                    placeholder="Your API key"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={apiSubmitting || !apiKeyName.trim() || !apiKeyValue.trim()}
+                  className="px-4 py-2 rounded-lg bg-amber-500 text-slate-900 font-medium text-sm hover:bg-amber-400 disabled:opacity-50"
+                >
+                  {apiSubmitting ? "Saving…" : "Save API"}
+                </button>
+              </form>
+            </section>
+            {apis.length === 0 ? (
+              <p className="text-slate-400 text-sm">No APIs stored yet. Add one above so tool creation can use it when the key name matches.</p>
+            ) : (
+              <ul className="space-y-2">
+                {apis.map((api) => (
+                  <li key={api.id} className="rounded-xl bg-slate-800/70 border border-slate-600/50 p-3">
+                    <p className="font-medium text-white text-sm">{api.key_name}</p>
+                    {api.description && <p className="text-xs text-slate-500 mt-0.5">{api.description}</p>}
+                    <p className="text-xs text-slate-600 mt-1">Value: {api.key_value_masked}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         ) : activeTab === "agents" ? (
           agents.length === 0 ? (
