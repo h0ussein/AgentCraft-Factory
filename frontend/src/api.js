@@ -16,6 +16,10 @@ export async function sendChat(message, sessionId = null, agentId = null) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
+    // Handle 429 (rate limit/quota exceeded) with friendly message
+    if (res.status === 429) {
+      throw new Error(err.detail || "The AI service is currently at capacity. Please try again in a few moments.");
+    }
     throw new Error(err.detail || `Chat failed: ${res.status}`);
   }
   return res.json();
@@ -33,6 +37,10 @@ export async function createTool(prompt, toolName = null, agentId = null) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
+    // Handle 429 (rate limit/quota exceeded) with friendly message
+    if (res.status === 429) {
+      throw new Error(err.detail || "The AI service is currently at capacity. Please try again in a few moments.");
+    }
     throw new Error(err.detail || `Create tool failed: ${res.status}`);
   }
   return res.json();
@@ -69,6 +77,26 @@ export async function listTools() {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || "Failed to list tools");
+  }
+  return res.json();
+}
+
+export async function listSessions(agentId = null) {
+  const url = agentId ? `${API_BASE}/sessions?agent_id=${agentId}` : `${API_BASE}/sessions`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to list sessions");
+  }
+  return res.json();
+}
+
+export async function getChatHistory(sessionId, agentId = null) {
+  const url = agentId ? `${API_BASE}/sessions/${sessionId}/history?agent_id=${agentId}` : `${API_BASE}/sessions/${sessionId}/history`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to get chat history");
   }
   return res.json();
 }

@@ -22,6 +22,7 @@ from agent_factory import run_agent_chat
 from config.db import get_db_if_connected
 from config.gemini_keys import get_gemini_api_keys
 from services.agents import list_agents_from_db
+from models.chat_history import list_all_sessions, get_session_history
 
 # MongoDB: try to connect first on startup, then close on shutdown
 @asynccontextmanager
@@ -240,6 +241,13 @@ def create_tool(request: CreateToolRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # Check if it's a quota/rate limit error
+        from config.gemini_keys import is_retryable_gemini_error
+        if is_retryable_gemini_error(e):
+            raise HTTPException(
+                status_code=429,
+                detail="The AI service is currently at capacity. Please try again in a few moments. If this persists, the API quota may have been exceeded."
+            )
         raise HTTPException(status_code=500, detail=f"Tool generation failed: {e}")
 
 
@@ -267,6 +275,13 @@ def chat(request: ChatRequest):
             session_id=request.session_id,
         )
     except Exception as e:
+        # Check if it's a quota/rate limit error
+        from config.gemini_keys import is_retryable_gemini_error
+        if is_retryable_gemini_error(e):
+            raise HTTPException(
+                status_code=429,
+                detail="The AI service is currently at capacity. Please try again in a few moments. If this persists, the API quota may have been exceeded."
+            )
         raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
 
 
@@ -288,6 +303,48 @@ def list_agents():
     """
     agents = list_agents_from_db()
     return AgentsListResponse(agents=agents, count=len(agents))
+
+
+@api.get("/sessions")
+def list_sessions(agent_id: str | None = None):
+    """
+    List all chat sessions, optionally filtered by agent_id.
+    Returns empty list when MongoDB is not configured (no 500).
+    """
+    try:
+        db = get_db_if_connected()
+        if db is None:
+            return {"sessions": [], "count": 0}
+        sessions = list_all_sessions(agent_id=agent_id)
+        return {"sessions": sessions, "count": len(sessions)}
+    except Exception as e:
+        # Graceful fallback if MongoDB not available
+        return {"sessions": [], "count": 0}
+
+
+@api.get("/sessions/{session_id}/history")
+def get_chat_history_endpoint(session_id: str, agent_id: str | None = None):
+    """
+    Get full chat history for a session.
+    Returns 404 if session not found, empty list if MongoDB not configured.
+    """
+    try:
+        db = get_db_if_connected()
+        if db is None:
+            return {"session_id": session_id, "agent_id": agent_id, "messages": []}
+        history = get_session_history(session_id, agent_id=agent_id)
+        if not history:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {
+            "session_id": history.get("session_id"),
+            "agent_id": history.get("agent_id"),
+            "messages": history.get("messages", []),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Graceful fallback
+        return {"session_id": session_id, "agent_id": agent_id, "messages": []}
 
 
 @api.post("/agents", response_model=CreateAgentResponse)

@@ -52,7 +52,13 @@ export default function CreateToolForm({ onClose, onSuccess }) {
       setResult(data);
       onSuccess?.(data);
     } catch (err) {
-      setError(err.message || "Failed to create tool");
+      const errorMessage = err.message || "Failed to create tool";
+      // Show user-friendly message for quota/rate limit errors
+      if (errorMessage.includes("capacity") || errorMessage.includes("quota")) {
+        setError("⚠️ The AI service is currently at capacity. This usually means the API quota has been exceeded. Please try again in a few moments, or contact support if the issue persists.");
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -113,7 +119,17 @@ export default function CreateToolForm({ onClose, onSuccess }) {
           </div>
 
           {error && (
-            <p className="mt-2 text-sm text-red-400">{error}</p>
+            <div className={`mt-3 p-3 rounded-lg border ${
+              error.includes("capacity") || error.includes("quota")
+                ? "bg-yellow-500/10 border-yellow-500/50"
+                : "bg-red-500/10 border-red-500/50"
+            }`}>
+              <p className={`text-sm ${
+                error.includes("capacity") || error.includes("quota")
+                  ? "text-yellow-400"
+                  : "text-red-400"
+              }`}>{error}</p>
+            </div>
           )}
           {result && (
             <div className="mt-3 p-3 rounded-lg bg-slate-900 border border-slate-600">

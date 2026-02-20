@@ -97,8 +97,9 @@ Output only the function code, no markdown."""
         max_output_tokens=2048,
         system_instruction=TOOL_GENERATION_SYSTEM,
     )
+    keys = get_gemini_api_keys()
     last_error = None
-    for api_key in get_gemini_api_keys():
+    for idx, api_key in enumerate(keys):
         if not api_key:
             continue
         try:
@@ -113,7 +114,8 @@ Output only the function code, no markdown."""
             return response.text.strip()
         except Exception as e:
             last_error = e
-            if is_retryable_gemini_error(e) and api_key != get_gemini_api_keys()[-1]:
+            # Retry with next key if quota exhausted and not the last key
+            if is_retryable_gemini_error(e) and idx < len(keys) - 1:
                 continue
             raise
     if last_error:
@@ -136,8 +138,9 @@ Code:
         max_output_tokens=256,
         system_instruction=SAFETY_REVIEW_SYSTEM,
     )
+    keys = get_gemini_api_keys()
     last_error = None
-    for api_key in get_gemini_api_keys():
+    for idx, api_key in enumerate(keys):
         if not api_key:
             continue
         try:
@@ -154,16 +157,17 @@ Code:
                 return True, "SAFE"
             if "UNSAFE" in text:
                 raw = response.text.strip()
-                idx = raw.upper().find("UNSAFE:")
-                if idx >= 0:
-                    reason = raw[idx + len("UNSAFE:"):].strip() or raw
+                unsafe_idx = raw.upper().find("UNSAFE:")
+                if unsafe_idx >= 0:
+                    reason = raw[unsafe_idx + len("UNSAFE:"):].strip() or raw
                 else:
                     reason = raw
                 return False, reason or "Forbidden or unsafe pattern detected."
             return False, "Safety review did not confirm SAFE."
         except Exception as e:
             last_error = e
-            if is_retryable_gemini_error(e) and api_key != get_gemini_api_keys()[-1]:
+            # Retry with next key if quota exhausted and not the last key
+            if is_retryable_gemini_error(e) and idx < len(keys) - 1:
                 continue
             raise
     if last_error:

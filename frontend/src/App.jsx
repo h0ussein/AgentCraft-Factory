@@ -1,6 +1,7 @@
 import { useState } from "react";
 import BottomNav from "./components/BottomNav";
 import ChatScreen from "./components/ChatScreen";
+import ChatSelectorScreen from "./components/ChatSelectorScreen";
 import MyAgentsScreen from "./components/MyAgentsScreen";
 import CreationModal from "./components/CreationModal";
 import CreateToolForm from "./components/CreateToolForm";
@@ -21,11 +22,43 @@ export default function App() {
   const [agentFormOpen, setAgentFormOpen] = useState(false);
   const [agentsVersion, setAgentsVersion] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState(null); // { id, name } for chat
+  const [currentSessionId, setCurrentSessionId] = useState(null); // null = show selector, string = show chat
+  const [currentAgentId, setCurrentAgentId] = useState(null); // agent_id for current session
 
   const handleAdd = () => setModalOpen(true);
   const handleSelectAgent = (agent) => {
     setSelectedAgent(agent ? { id: agent.id, name: agent.name } : null);
     setTab("chat");
+    setCurrentSessionId(null); // Show chat selector when agent is selected
+  };
+
+  const handleSelectChat = async (sessionId, agentId) => {
+    setCurrentSessionId(sessionId);
+    setCurrentAgentId(agentId);
+    // If agent is different from selected, try to find it
+    if (agentId && selectedAgent?.id !== agentId) {
+      try {
+        const { listAgents } = await import("./api");
+        const agentsData = await listAgents();
+        const agent = agentsData.agents?.find((a) => a.id === agentId);
+        if (agent) {
+          setSelectedAgent({ id: agent.id, name: agent.name });
+        }
+      } catch (err) {
+        console.error("Failed to load agent info:", err);
+      }
+    }
+  };
+
+  const handleCreateNewChat = () => {
+    // Generate a new session ID to start a fresh chat
+    const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    setCurrentSessionId(newSessionId);
+    setCurrentAgentId(selectedAgent?.id || null);
+  };
+
+  const handleBackToChatSelector = () => {
+    setCurrentSessionId(null);
   };
   const handleCreateTool = () => {
     setModalOpen(false);
@@ -52,10 +85,20 @@ export default function App() {
     <div className="min-h-screen bg-slate-950 flex flex-col w-full max-w-[var(--mobile-max-width,428px)] mx-auto min-w-0">
       <main className="flex-1 flex flex-col overflow-hidden pb-[calc(5rem+var(--safe-area-bottom,0px))]">
         {tab === "chat" && (
-          <ChatScreen
-            selectedAgentId={selectedAgent?.id}
-            selectedAgentName={selectedAgent?.name}
-          />
+          currentSessionId === null ? (
+            <ChatSelectorScreen
+              onSelectChat={handleSelectChat}
+              onCreateNewChat={handleCreateNewChat}
+              selectedAgentId={selectedAgent?.id || null}
+            />
+          ) : (
+            <ChatScreen
+              sessionId={currentSessionId}
+              selectedAgentId={currentAgentId || selectedAgent?.id || null}
+              selectedAgentName={selectedAgent?.name}
+              onBack={handleBackToChatSelector}
+            />
+          )
         )}
         {tab === "agents" && (
           <MyAgentsScreen
@@ -67,7 +110,15 @@ export default function App() {
 
       <BottomNav
         active={tab}
-        onChat={() => setTab("chat")}
+        onChat={() => {
+          setTab("chat");
+          // If in chat tab, show selector if no session selected
+          if (currentSessionId === null) {
+            // Already showing selector
+          } else {
+            // Could optionally go back to selector, or keep current chat
+          }
+        }}
         onAdd={handleAdd}
         onMyAgents={() => setTab("agents")}
       />

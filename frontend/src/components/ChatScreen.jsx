@@ -4,24 +4,88 @@
  */
 
 import { useState, useRef, useEffect } from "react";
-import { sendChat } from "../api";
+import { sendChat, getChatHistory } from "../api";
 import ToolSelectorModal from "./ToolSelectorModal";
 
-const SESSION_ID = "mobile-session-1";
+function generateSessionId() {
+  return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
 
-export default function ChatScreen({ selectedAgentId = null, selectedAgentName = null }) {
-  const [messages, setMessages] = useState([
-    {
-      role: "agent",
-      content: "Hello! I am online and ready to assist you. You can ask me to use tools or answer questions. How can I help you today?",
-      id: "welcome",
-    },
-  ]);
+export default function ChatScreen({ 
+  sessionId: propSessionId = null, 
+  selectedAgentId = null, 
+  selectedAgentName = null,
+  onBack = null 
+}) {
+  const [sessionId, setSessionId] = useState(propSessionId || generateSessionId());
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(!!propSessionId);
   const [error, setError] = useState(null);
   const [toolSelectorOpen, setToolSelectorOpen] = useState(false);
   const bottomRef = useRef(null);
+
+  // Update sessionId when propSessionId changes
+  useEffect(() => {
+    if (propSessionId) {
+      setSessionId(propSessionId);
+    } else if (!propSessionId && !sessionId) {
+      setSessionId(generateSessionId());
+    }
+  }, [propSessionId]);
+
+  // Load chat history when sessionId is provided
+  useEffect(() => {
+    if (propSessionId) {
+      async function loadHistory() {
+        try {
+          setLoadingHistory(true);
+          const history = await getChatHistory(propSessionId, selectedAgentId || undefined);
+          if (history.messages && history.messages.length > 0) {
+            // Convert backend messages to frontend format
+            const formattedMessages = history.messages.map((msg, idx) => ({
+              role: msg.role,
+              content: msg.content,
+              id: `${msg.role}-${idx}-${msg.timestamp || Date.now()}`,
+            }));
+            setMessages(formattedMessages);
+          } else {
+            // No history, show welcome message
+            setMessages([
+              {
+                role: "agent",
+                content: "Hello! I am online and ready to assist you. You can ask me to use tools or answer questions. How can I help you today?",
+                id: "welcome",
+              },
+            ]);
+          }
+        } catch (err) {
+          console.error("Failed to load chat history:", err);
+          // Show welcome message on error
+          setMessages([
+            {
+              role: "agent",
+              content: "Hello! I am online and ready to assist you. You can ask me to use tools or answer questions. How can I help you today?",
+              id: "welcome",
+            },
+          ]);
+        } finally {
+          setLoadingHistory(false);
+        }
+      }
+      loadHistory();
+    } else {
+      // New chat, show welcome message
+      setMessages([
+        {
+          role: "agent",
+          content: "Hello! I am online and ready to assist you. You can ask me to use tools or answer questions. How can I help you today?",
+          id: "welcome",
+        },
+      ]);
+    }
+  }, [propSessionId, selectedAgentId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -36,14 +100,23 @@ export default function ChatScreen({ selectedAgentId = null, selectedAgentName =
     setMessages((prev) => [...prev, { role: "user", content: text, id: `u-${Date.now()}` }]);
     setLoading(true);
     try {
-      const data = await sendChat(text, SESSION_ID, selectedAgentId || undefined);
+      const data = await sendChat(text, sessionId, selectedAgentId || undefined);
       const reply = data?.response ?? "No response.";
+      // Update sessionId if backend returned a different one
+      if (data.session_id && data.session_id !== sessionId) {
+        setSessionId(data.session_id);
+      }
       setMessages((prev) => [...prev, { role: "agent", content: reply, id: `a-${Date.now()}` }]);
     } catch (err) {
-      setError(err.message || "Something went wrong");
+      const errorMessage = err.message || "Something went wrong";
+      setError(errorMessage);
+      // Show user-friendly error message in chat
+      const friendlyMessage = errorMessage.includes("capacity") || errorMessage.includes("quota") 
+        ? "⚠️ The AI service is currently at capacity. This usually means the API quota has been exceeded. Please try again in a few moments, or contact support if the issue persists."
+        : `Error: ${errorMessage}`;
       setMessages((prev) => [
         ...prev,
-        { role: "agent", content: `Error: ${err.message}`, id: `err-${Date.now()}` },
+        { role: "agent", content: friendlyMessage, id: `err-${Date.now()}` },
       ]);
     } finally {
       setLoading(false);
@@ -57,7 +130,11 @@ export default function ChatScreen({ selectedAgentId = null, selectedAgentName =
     <div className="flex flex-col h-full min-h-0 flex-1">
       {/* Header */}
       <header className="flex items-center justify-between px-3 sm:px-4 py-3 border-b border-slate-700/50 bg-slate-900/50 shrink-0 gap-2">
-        <button className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center -ml-1 text-slate-400 hover:text-white touch-manipulation" aria-label="Back">
+        <button 
+          onClick={onBack || undefined}
+          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center -ml-1 text-slate-400 hover:text-white touch-manipulation" 
+          aria-label="Back"
+        >
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
@@ -85,50 +162,66 @@ export default function ChatScreen({ selectedAgentId = null, selectedAgentName =
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 py-4 space-y-4">
-        <p className="text-center text-xs text-slate-500">Today, {timeStr}</p>
-
-        {messages.map((m) =>
-          m.role === "user" ? (
-            <div key={m.id} className="flex justify-end gap-2">
-              <div className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-purple-500/90 text-white px-4 py-2.5 text-sm break-words">
-                {m.content}
-              </div>
-              <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center shrink-0">
-                <svg className="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              </div>
-            </div>
-          ) : (
-            <div key={m.id} className="flex justify-start gap-2">
-              <div className="w-8 h-8 rounded-full bg-purple-500/30 flex items-center justify-center shrink-0">
-                <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="10" rx="2" />
-                  <circle cx="12" cy="5" r="2" />
-                </svg>
-              </div>
-              <div className="max-w-[85%] min-w-0 rounded-2xl rounded-bl-md bg-slate-700/80 text-slate-100 px-4 py-2.5 text-sm break-words">
-                {m.content}
-              </div>
-            </div>
-          )
-        )}
-
-        {loading && (
-          <div className="flex justify-start gap-2">
-            <div className="w-8 h-8 rounded-full bg-purple-500/30 flex items-center justify-center shrink-0">
-              <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="11" width="18" height="10" rx="2" />
-                <circle cx="12" cy="5" r="2" />
-              </svg>
-            </div>
-            <div className="rounded-2xl rounded-bl-md bg-slate-700/80 px-4 py-3 flex gap-1">
+        {loadingHistory ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="flex gap-1">
               <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "0ms" }} />
               <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "150ms" }} />
               <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
           </div>
+        ) : (
+          <>
+            <p className="text-center text-xs text-slate-500">Today, {timeStr}</p>
+
+            {messages.map((m) =>
+              m.role === "user" ? (
+                <div key={m.id} className="flex justify-end gap-2">
+                  <div className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-purple-500/90 text-white px-4 py-2.5 text-sm break-words">
+                    {m.content}
+                  </div>
+                  <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center shrink-0">
+                    <svg className="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  </div>
+                </div>
+              ) : (
+                <div key={m.id} className="flex justify-start gap-2">
+                  <div className="w-8 h-8 rounded-full bg-purple-500/30 flex items-center justify-center shrink-0">
+                    <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="11" width="18" height="10" rx="2" />
+                      <circle cx="12" cy="5" r="2" />
+                    </svg>
+                  </div>
+                  <div className={`max-w-[85%] min-w-0 rounded-2xl rounded-bl-md px-4 py-2.5 text-sm break-words ${
+                    m.content.includes("⚠️") || m.content.includes("capacity") || m.content.includes("quota")
+                      ? "bg-yellow-500/20 border border-yellow-500/50 text-yellow-100"
+                      : "bg-slate-700/80 text-slate-100"
+                  }`}>
+                    {m.content}
+                  </div>
+                </div>
+              )
+            )}
+
+            {loading && (
+              <div className="flex justify-start gap-2">
+                <div className="w-8 h-8 rounded-full bg-purple-500/30 flex items-center justify-center shrink-0">
+                  <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="10" rx="2" />
+                    <circle cx="12" cy="5" r="2" />
+                  </svg>
+                </div>
+                <div className="rounded-2xl rounded-bl-md bg-slate-700/80 px-4 py-3 flex gap-1">
+                  <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            )}
+          </>
         )}
         <div ref={bottomRef} />
       </div>

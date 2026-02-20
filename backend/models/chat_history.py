@@ -75,3 +75,68 @@ def append_messages(session_id: str, agent_id: str, new_messages: list[dict]):
         {"$push": {"messages": {"$each": new_messages}}},
         upsert=True,
     )
+
+
+def list_all_sessions(agent_id: str | None = None) -> list[dict]:
+    """
+    List all chat sessions, optionally filtered by agent_id.
+    Returns sessions with metadata: session_id, agent_id, last_message_time, message_count, preview.
+    Returns empty list if MongoDB is not connected.
+    """
+    try:
+        col = get_chat_history_collection()
+        query = {}
+        if agent_id:
+            agent_oid = str(agent_id) if isinstance(agent_id, ObjectId) else agent_id
+            query["agent_id"] = agent_oid
+        
+        sessions = list(col.find(query))
+        result = []
+        for sess in sessions:
+            messages = sess.get("messages", [])
+            last_message = messages[-1] if messages else None
+            last_message_time = last_message.get("timestamp") if last_message else sess.get("created_at", datetime.now(timezone.utc))
+            
+            # Get preview from last user message or last message
+            preview = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    preview = msg.get("content", "")[:100]
+                    break
+            if not preview and last_message:
+                preview = last_message.get("content", "")[:100]
+            
+            result.append({
+                "session_id": sess.get("session_id"),
+                "agent_id": sess.get("agent_id"),
+                "last_message_time": last_message_time.isoformat() if isinstance(last_message_time, datetime) else str(last_message_time),
+                "message_count": len(messages),
+                "preview": preview,
+            })
+        
+        # Sort by last_message_time descending (newest first)
+        result.sort(key=lambda x: x["last_message_time"], reverse=True)
+        return result
+    except Exception:
+        return []
+
+
+def get_session_history(session_id: str, agent_id: str | None = None) -> dict | None:
+    """
+    Get full chat history for a session.
+    Returns session document with all messages.
+    Returns None if MongoDB is not connected or session not found.
+    """
+    try:
+        col = get_chat_history_collection()
+        query = {"session_id": session_id}
+        if agent_id:
+            agent_oid = str(agent_id) if isinstance(agent_id, ObjectId) else agent_id
+            query["agent_id"] = agent_oid
+        
+        doc = col.find_one(query)
+        if doc and "_id" in doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
+    except Exception:
+        return None
