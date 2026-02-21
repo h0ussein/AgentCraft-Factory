@@ -109,6 +109,7 @@ class CreateToolRequest(BaseModel):
     prompt: str = Field(..., description="Natural language description of the tool to create")
     tool_name: str | None = Field(None, description="Optional filename for the tool (e.g. 'weather')")
     agent_id: str | None = Field(None, description="Optional agent _id to link this tool to (MongoDB)")
+    user_id: str | None = Field(None, description="Optional user _id for storing resolved API keys")
 
 
 class CreateToolResponse(BaseModel):
@@ -502,7 +503,7 @@ def list_admin_tools(x_admin_passcode: str | None = Header(None, alias="X-Admin-
         from bson import ObjectId
         tools = list_all_tools()
         db = get_db_if_connected()
-        if db:
+        if db is not None:
             for t in tools:
                 aid = t.get("owner_agent_id")
                 if aid:

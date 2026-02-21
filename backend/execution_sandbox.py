@@ -22,12 +22,24 @@ except ImportError:
 
 import json as _json
 import requests as _requests
+import math as _math
+import re as _re
+import datetime as _datetime
+from decimal import Decimal as _Decimal
 
 
 def _safe_import(name: str, globals=None, locals=None, fromlist=(), level=0):
-    """Allow only 'json' and 'requests' to be imported."""
-    if name in ("json", "requests"):
-        return _json if name == "json" else _requests
+    """Allow only safe stdlib/API modules: json, requests, math, re, datetime, decimal."""
+    _allowed = {
+        "json": _json,
+        "requests": _requests,
+        "math": _math,
+        "re": _re,
+        "datetime": _datetime,
+        "decimal": __import__("decimal"),
+    }
+    if name in _allowed:
+        return _allowed[name]
     raise ImportError(f"Import of '{name}' is not allowed in the tool sandbox.")
 
 
@@ -46,7 +58,7 @@ def _fallback_safe_builtins():
 
 
 def _build_sandbox_globals():
-    """Build the restricted globals dict: safe builtins + only json, requests, os.getenv."""
+    """Build the restricted globals dict: safe builtins + json, requests, math, re, datetime, decimal, os.getenv."""
     safe_os = SimpleNamespace(getenv=os.getenv)
     g = {
         "__builtins__": safe_builtins if _restricted_available else _fallback_safe_builtins(),
@@ -54,6 +66,10 @@ def _build_sandbox_globals():
         "__metaclass__": type,
         "json": _json,
         "requests": _requests,
+        "math": _math,
+        "re": _re,
+        "datetime": _datetime,
+        "Decimal": _Decimal,
         "os": safe_os,
         "__import__": _safe_import,
     }

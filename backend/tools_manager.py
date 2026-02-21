@@ -16,37 +16,36 @@ load_dotenv()
 CUSTOM_TOOLS_DIR = Path(__file__).resolve().parent / "custom_tools"
 CUSTOM_TOOLS_DIR.mkdir(exist_ok=True)
 
-# Code standards for generated tools + strict safety rules
-TOOL_GENERATION_SYSTEM = """You are a Python code generator for agent tools. Your output must be safe and sandboxed.
+# Code standards for generated tools + strict safety rules (no privacy/attack capability)
+TOOL_GENERATION_SYSTEM = """You are a Python code generator for agent tools. Your output must be safe and sandboxed. Tools must NEVER access the file system, run shell commands, or do anything that could compromise privacy or attack a system.
 
 RULES (must follow):
 1. Generate ONLY a single Python function (no class, no if __name__ block).
 2. The function must have a clear docstring describing what it does (this is used by the AI agent).
 3. Use type hints for parameters and return type (e.g. def my_tool(query: str) -> str:).
-4. NEVER hardcode API keys. For any external API that needs a key:
-   - Use ONLY os.getenv('KEY_NAME') to read that key (e.g. os.getenv('OPENAI_API_KEY')).
-   - If the key is missing or empty, return exactly: 'Please add your [KEY_NAME] in settings'
-   - You may ONLY access the specific API key(s) required for this tool. Do NOT use os.environ, os.environ.get, or iterate over environment variables.
-5. ALLOWED: requests, json, os.getenv('SOME_KEY') only. You may use: import requests, import json, and os.getenv('KEY_NAME') for the one or two keys the tool needs.
-6. STRICTLY FORBIDDEN:
-   - File system access: no open(), Path(), read(), write(), __file__, os.path, os.listdir, os.remove, os.mkdir, glob, or any file I/O. The only exception is that the tool must NOT access the local file system at all (generated tools run in memory only).
-   - Dangerous modules: no subprocess, shutil, os.system, eval(), exec(), compile(), __import__ with user input, or similar. Do not use os for anything except os.getenv('KEY_NAME').
-   - No os.environ (use only os.getenv('KEY_NAME') for the specific key needed). No pickle, shelve, or deserializing untrusted data.
-7. Return a string result that the agent can show to the user. Do not print(); use return.
-8. Output ONLY valid Python code for the function. No markdown code fences, no explanation before or after.
-9. Function name must be a valid Python identifier (e.g. get_weather, search_web). Use snake_case."""
+4. For tools that need NO external API (e.g. math, string processing, calculations): use only the ALLOWED modules below. No os.getenv needed.
+5. For tools that call an external API: NEVER hardcode API keys. Use ONLY os.getenv('KEY_NAME') to read that key. If the key is missing, return exactly: 'Please add your [KEY_NAME] in settings'. Do NOT use os.environ or os.environ.get.
+6. ALLOWED modules: math, json, re, requests (for HTTP only), datetime, decimal. For API keys: os.getenv('KEY_NAME') only.
+7. STRICTLY FORBIDDEN (never generate these):
+   - File system: open(), Path(), read(), write(), __file__, os.path, os.listdir, os.remove, os.mkdir, glob, any file I/O.
+   - Code execution or shell: subprocess, shutil, os.system, eval(), exec(), compile(), __import__ with user input.
+   - Security risks: pickle, shelve, deserializing untrusted data, accessing internal IPs or non-HTTPS endpoints for sensitive data.
+   - Anything that could steal data, attack a server, or access resources outside the tool's stated purpose.
+8. Return a string result that the agent can show to the user. Do not print(); use return.
+9. Output ONLY valid Python code for the function. No markdown code fences, no explanation before or after.
+10. Function name must be a valid Python identifier (e.g. get_weather, do_math). Use snake_case."""
 
-# Safety Review: Gemini checks generated code for malicious patterns before saving
-SAFETY_REVIEW_SYSTEM = """You are a security reviewer for Python tool code. Your job is to detect forbidden or malicious patterns.
+# Safety Review: block anything that could harm privacy or attack systems
+SAFETY_REVIEW_SYSTEM = """You are a security reviewer for Python tool code. Reject anything that could compromise privacy, attack a system, or access resources outside the tool's purpose.
 
-STRICTLY FORBIDDEN patterns (reply UNSAFE if any appear):
-- File system: open(, Path(, read(), write(), os.path, os.listdir, os.remove, os.mkdir, glob, __file__, file I/O
-- Dangerous: subprocess, shutil, os.system, eval(, exec(, compile(, __import__(, pickle, shelve
+STRICTLY FORBIDDEN (reply UNSAFE if any appear):
+- File system: open(, Path(, read(), write(), os.path, os.listdir, os.remove, os.mkdir, glob, __file__, any file I/O
+- Code execution/shell: subprocess, shutil, os.system, eval(, exec(, compile(, __import__( with user input
+- Dangerous: pickle, shelve, deserialize untrusted data
 - os used for anything other than os.getenv('SOME_API_KEY') e.g. no os.environ, os.environ.get, os.path, os.listdir
-- Network to non-HTTPS or internal IPs (optional: flag if present)
-- Any form of code execution, shell commands, or file system writes
+- Network to internal IPs, non-HTTPS for sensitive data, or any pattern that could be used to probe/attack
 
-ALLOWED: requests.get/post, json.loads/dumps, os.getenv('NAMED_KEY') for API keys only.
+ALLOWED: math, json, re, datetime, decimal, requests.get/post to public HTTPS APIs, os.getenv('NAMED_KEY') for API keys only.
 
 Reply with exactly one line:
 SAFE - if the code contains only allowed patterns and no forbidden ones.
