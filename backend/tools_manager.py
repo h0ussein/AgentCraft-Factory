@@ -33,7 +33,7 @@ RULES (must follow):
    - Anything that could steal data, attack a server, or access resources outside the tool's stated purpose.
 8. Return a string result that the agent can show to the user. Do not print(); use return.
 9. Output ONLY valid Python code for the function. No markdown code fences, no explanation before or after.
-10. Function name must be a valid Python identifier (e.g. get_weather, do_math). Use snake_case."""
+10. Function name must be SHORT and simple (e.g. math_tool, get_weather, do_calc). Do NOT use long names like tool_that_can_do_math_operations. Use snake_case, 2-4 words max."""
 
 # Safety Review: block anything that could harm privacy or attack systems
 SAFETY_REVIEW_SYSTEM = """You are a security reviewer for Python tool code. Reject anything that could compromise privacy, attack a system, or access resources outside the tool's purpose.
@@ -81,6 +81,42 @@ def _sanitize_tool_name(name: str) -> str:
     return safe or "tool"
 
 
+def suggest_short_tool_name(user_description: str) -> str:
+    """
+    Ask Gemini for a short, simple name for the tool (e.g. math_tool, weather_tool).
+    Used as file base name when the user does not provide one.
+    """
+    prompt = f"""The user wants to create a tool with this description: "{user_description}"
+
+Suggest a very short name for this tool: 2-4 words, snake_case, e.g. math_tool, weather_tool, btc_price, do_calc.
+Do NOT use long names like "tool_create_a_tool_can_do_math". Reply with ONLY the name, nothing else."""
+    config = types.GenerateContentConfig(temperature=0.1, max_output_tokens=32)
+    keys = get_gemini_api_keys()
+    for api_key in keys:
+        if not api_key:
+            continue
+        try:
+            client = genai.Client(api_key=api_key.strip())
+            response = client.models.generate_content(
+                model=get_gemini_model_for_tools(),
+                contents=prompt,
+                config=config,
+            )
+            if not response or not response.text:
+                break
+            name = response.text.strip()
+            name = re.sub(r"[^\w]", "_", name.lower())[:30]
+            name = re.sub(r"_+", "_", name).strip("_")
+            if name and len(name) >= 2:
+                return name
+            break
+        except Exception as e:
+            if is_retryable_gemini_error(e):
+                continue
+            break
+    return _sanitize_filename(user_description)
+
+
 def generate_tool_code(user_description: str) -> str:
     """
     Ask Gemini 2.5 Flash to write a Python function. Uses secondary API key on 429/quota.
@@ -89,6 +125,7 @@ def generate_tool_code(user_description: str) -> str:
 
 Description: {user_description}
 
+Use a short, simple function name (e.g. math_tool, get_weather, do_calc), NOT a long sentence like "tool_that_can_do_math_operations". Name it like "math_tool" or "weather_tool".
 Remember: Use only os.getenv('KEY_NAME') for API keys; no file system, no subprocess/shutil, no os.environ. If key missing, return 'Please add your [KEY_NAME] in settings'.
 Output only the function code, no markdown."""
     config = types.GenerateContentConfig(
@@ -326,7 +363,10 @@ def create_tool_file(user_description: str, tool_name: str | None = None) -> Tup
     if required_keys:
         public_keys = detect_public_api_keys(user_description, required_keys)
 
-    base = _sanitize_tool_name(tool_name) if tool_name else _sanitize_filename(user_description)
+    if tool_name:
+        base = _sanitize_tool_name(tool_name)
+    else:
+        base = suggest_short_tool_name(user_description)
     # Ensure we have a unique .py file
     path = CUSTOM_TOOLS_DIR / f"{base}.py"
     counter = 0
@@ -357,7 +397,10 @@ def generate_tool_code_and_keys(user_description: str, tool_name: str | None = N
     public_keys = {}
     if required_keys:
         public_keys = detect_public_api_keys(user_description, required_keys)
-    base = _sanitize_tool_name(tool_name) if tool_name else _sanitize_filename(user_description)
+    if tool_name:
+        base = _sanitize_tool_name(tool_name)
+    else:
+        base = suggest_short_tool_name(user_description)
     return code, base, required_keys, public_keys
 
 
