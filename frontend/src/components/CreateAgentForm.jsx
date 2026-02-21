@@ -1,12 +1,19 @@
 /**
- * Create Agent Form – name + optional system instruction, POSTs to /agents
+ * Create Agent Form – name, model (2.5 Flash / 2.5 Pro / 3 Flash), optional system instruction
  */
 
 import { useState } from "react";
 import { createAgent } from "../api";
 
+const MODEL_OPTIONS = [
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  { id: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
+];
+
 export default function CreateAgentForm({ onClose, onSuccess }) {
   const [name, setName] = useState("");
+  const [modelId, setModelId] = useState("gemini-2.5-flash");
   const [systemInstruction, setSystemInstruction] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -18,7 +25,7 @@ export default function CreateAgentForm({ onClose, onSuccess }) {
     setError(null);
     setLoading(true);
     try {
-      const data = await createAgent(name.trim(), systemInstruction.trim());
+      const data = await createAgent(name.trim(), systemInstruction.trim(), modelId);
       setResult(data);
       onSuccess?.(data);
     } catch (err) {
@@ -77,6 +84,18 @@ export default function CreateAgentForm({ onClose, onSuccess }) {
                 required
                 autoFocus
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Model</label>
+              <select
+                value={modelId}
+                onChange={(e) => setModelId(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-700/80 border border-slate-600 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                {MODEL_OPTIONS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">System instruction (optional)</label>

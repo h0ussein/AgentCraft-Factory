@@ -26,7 +26,7 @@ from tools_manager import (
 )
 from agent_factory import run_agent_chat
 from config.db import get_db_if_connected
-from config.gemini_keys import get_gemini_api_keys
+from config.gemini_keys import get_gemini_api_keys, ALLOWED_GEMINI_MODELS
 from services.agents import list_agents_from_db
 from models.chat_history import list_all_sessions, get_session_history, delete_session, delete_all_sessions_for_agent
 
@@ -419,10 +419,12 @@ def create_agent(request: CreateAgentRequest):
     name = (request.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
+    raw_model = (request.model_id or "gemini-2.5-flash").strip()
+    model_id = raw_model if raw_model in ALLOWED_GEMINI_MODELS else "gemini-2.5-flash"
     doc = {
         "name": name,
         "system_instruction": (request.system_instruction or "").strip(),
-        "model_id": (request.model_id or "gemini-2.5-flash").strip(),
+        "model_id": model_id,
         "tools": [],
     }
     try:

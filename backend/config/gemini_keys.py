@@ -1,5 +1,6 @@
 # config/gemini_keys.py
 # Primary + secondary + third Gemini API keys; retry with next key on 429 / quota exhausted.
+# Supported models: Gemini 2.5 Flash, 2.5 Pro, 3 Flash (all API keys can use any of these).
 
 import os
 
@@ -8,6 +9,24 @@ from pathlib import Path
 
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(_ENV_PATH)
+
+# Model IDs supported by the Gemini API (usable with any of the API keys)
+GEMINI_MODEL_2_5_FLASH = "gemini-2.5-flash"
+GEMINI_MODEL_2_5_PRO = "gemini-2.5-pro"
+GEMINI_MODEL_3_FLASH = "gemini-3-flash-preview"
+
+ALLOWED_GEMINI_MODELS = (GEMINI_MODEL_2_5_FLASH, GEMINI_MODEL_2_5_PRO, GEMINI_MODEL_3_FLASH)
+
+
+def get_gemini_model_for_tools() -> str:
+    """
+    Model used for tool generation, safety review, and public key detection.
+    Set GEMINI_MODEL_TOOLS in .env to gemini-2.5-pro or gemini-3-flash-preview to override.
+    """
+    env = (os.getenv("GEMINI_MODEL_TOOLS") or "").strip().lower()
+    if env in ALLOWED_GEMINI_MODELS:
+        return env
+    return GEMINI_MODEL_2_5_FLASH
 
 
 def get_gemini_api_keys() -> list[str]:

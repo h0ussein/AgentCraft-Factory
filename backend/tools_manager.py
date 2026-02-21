@@ -52,7 +52,7 @@ SAFE - if the code contains only allowed patterns and no forbidden ones.
 UNSAFE: <brief reason> - if any forbidden pattern or risk is found."""
 
 
-from config.gemini_keys import get_gemini_api_keys, is_retryable_gemini_error
+from config.gemini_keys import get_gemini_api_keys, get_gemini_model_for_tools, is_retryable_gemini_error
 
 
 def _get_genai_client(api_key: str | None = None):
@@ -104,7 +104,7 @@ Output only the function code, no markdown."""
         try:
             client = genai.Client(api_key=api_key.strip())
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=get_gemini_model_for_tools(),
                 contents=prompt,
                 config=config,
             )
@@ -151,7 +151,7 @@ Code:
         try:
             client = genai.Client(api_key=api_key.strip())
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=get_gemini_model_for_tools(),
                 contents=prompt,
                 config=config,
             )
@@ -254,7 +254,7 @@ If you find a real public/demo key value, use it. If you truly have no public ke
         try:
             client = genai.Client(api_key=api_key.strip())
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=get_gemini_model_for_tools(),
                 contents=prompt,
                 config=config,
             )
