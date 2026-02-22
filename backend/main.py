@@ -215,7 +215,7 @@ def create_tool(request: CreateToolRequest):
             user_description=request.prompt.strip(),
             tool_name=request.tool_name.strip() if request.tool_name else None,
         )
-        # Resolve keys: (1) admin-stored APIs, (2) public key search (Gemini) for this tool
+        # Resolve keys: (1) admin-stored APIs, (2) public key search (Gemini), (3) process env (incl. aliases)
         resolved = {}
         try:
             from models.admin_api import get_admin_api_values_for_keys
@@ -225,17 +225,15 @@ def create_tool(request: CreateToolRequest):
         for k in required_api_keys:
             if k not in resolved or not resolved[k]:
                 resolved[k] = (public_api_keys.get(k) or "").strip() or None
+        for k in required_api_keys:
+            if resolved.get(k):
+                continue
+            val = (os.getenv(k) or "").strip() or None
+            if not val and k == "OPENWEATHER_API_KEY":
+                val = (os.getenv("WEATHER_API_KEY") or "").strip() or None
+            resolved[k] = val
         missing = [k for k in required_api_keys if not resolved.get(k)]
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "We couldn't find an API key for this tool. We checked Admin APIs and searched for a public key. Required: "
-                    + ", ".join(missing)
-                    + ". Add them in Admin → APIs, or use a service that offers a public API."
-                ),
-            )
-        # All keys resolved: write file and register tool
+        # Create tool even when some keys are missing; runtime will prompt "Please add your [KEY] in settings"
         path = write_tool_file(code, base_name)
         from models.tool import create_tool_doc
         from models.agent import get_agent_collection
@@ -248,7 +246,7 @@ def create_tool(request: CreateToolRequest):
             file_path=str(path),
             owner_agent_id=request.agent_id,
             required_api_keys=required_api_keys,
-            public_api_keys=resolved,
+            public_api_keys={k: v for k, v in resolved.items() if v},
         )
         if request.user_id:
             try:
@@ -271,8 +269,12 @@ def create_tool(request: CreateToolRequest):
                     {"$push": {"tools": tool_id}},
                 )
         message = "Tool created. You can use it in /chat."
-        if resolved:
-            message += " Keys used: " + ", ".join(resolved.keys()) + "."
+        if resolved and any(resolved.get(k) for k in required_api_keys):
+            used = [k for k in required_api_keys if resolved.get(k)]
+            if used:
+                message += " Keys used: " + ", ".join(used) + "."
+        if missing:
+            message += " Add these keys in Admin or .env to use the tool: " + ", ".join(missing) + "."
         return CreateToolResponse(
             success=True,
             message=message,

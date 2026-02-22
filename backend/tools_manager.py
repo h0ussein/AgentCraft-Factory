@@ -250,10 +250,46 @@ def extract_api_key_requirements(code: str) -> List[str]:
     return sorted(list(set(matches)))
 
 
+# Fallback map for well-known public/demo API keys when Gemini returns NONE. Testing only; users should add their own in Admin or .env.
+PUBLIC_API_KEY_FALLBACKS: Dict[str, str] = {
+    "OPENWEATHER_API_KEY": "",  # Set a demo key here for testing if desired; else leave empty and use Admin/.env
+}
+
+
+def _parse_public_key_lines(text: str, required_keys: List[str]) -> Dict[str, str]:
+    """Parse KEY_NAME: value lines from model output; looser matching (strip, optional prefix)."""
+    detected_keys = {}
+    required_set = {k.upper() for k in required_keys}
+    required_original = {k.upper(): k for k in required_keys}
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        parts = line.split(":", 1)
+        if len(parts) != 2:
+            continue
+        key_name = parts[0].strip().upper()
+        key_value = (parts[1].strip() or "").strip()
+        if not key_value:
+            continue
+        # Match required key exactly or by normalized name
+        if key_name in required_set:
+            detected_keys[required_original[key_name]] = parts[1].strip()
+        else:
+            for req in required_keys:
+                if req.upper() in key_name or key_name in req.upper():
+                    detected_keys[req] = parts[1].strip()
+                    break
+    return detected_keys
+
+
 def detect_public_api_keys(user_description: str, required_keys: List[str]) -> Dict[str, str]:
     """
     Use Gemini to detect if any of the required API keys have public/free tier options.
     Returns dict mapping KEY_NAME -> public_key_value if found, empty dict otherwise.
+    When the model returns NONE, applies a minimal fallback map for well-known keys (e.g. OpenWeatherMap).
     
     Args:
         user_description: Original tool description
@@ -296,26 +332,18 @@ If you find a real public/demo key value, use it. If you truly have no public ke
                 config=config,
             )
             if not response or not response.text:
-                return {}
+                break
             text = response.text.strip()
             # Only treat as "no keys" if response is just NONE (or similar)
             if text.upper().strip() in ("NONE", "N/A", "NONE."):
-                return {}
+                break
             if "NONE" in text.upper() and len(text.split()) <= 2:
-                return {}
+                break
 
-            # Parse KEY_NAME: value pairs
-            detected_keys = {}
-            for line in text.split('\n'):
-                line = line.strip()
-                if ':' in line and not line.startswith('#'):
-                    parts = line.split(':', 1)
-                    if len(parts) == 2:
-                        key_name = parts[0].strip()
-                        key_value = parts[1].strip()
-                        if key_value and key_name in required_keys:
-                            detected_keys[key_name] = key_value
-            return detected_keys
+            detected_keys = _parse_public_key_lines(text, required_keys)
+            if detected_keys:
+                return detected_keys
+            break
         except Exception as e:
             last_error = e
             if is_retryable_gemini_error(e):
@@ -323,9 +351,13 @@ If you find a real public/demo key value, use it. If you truly have no public ke
                     continue
                 else:
                     break
-            # Non-retryable error, return empty
             break
-    return {}
+    # Apply minimal fallback for well-known keys (testing only; users should add their own in Admin or .env)
+    fallback = {}
+    for k in required_keys:
+        if k in PUBLIC_API_KEY_FALLBACKS and PUBLIC_API_KEY_FALLBACKS[k]:
+            fallback[k] = PUBLIC_API_KEY_FALLBACKS[k]
+    return fallback
 
 
 def create_tool_file(user_description: str, tool_name: str | None = None) -> Tuple[Path, Dict[str, str]]:
