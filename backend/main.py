@@ -25,6 +25,7 @@ from tools_manager import (
     write_tool_file,
 )
 from agent_factory import run_agent_chat
+from services.agent_manager import run_agent_chat_genai
 from config.db import get_db_if_connected
 from config.gemini_keys import get_gemini_api_keys, ALLOWED_GEMINI_MODELS
 from services.agents import list_agents_from_db
@@ -305,12 +306,25 @@ def chat(request: ChatRequest):
             detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
         )
     try:
-        response_text = run_agent_chat(
-            message=request.message.strip(),
-            session_id=request.session_id,
-            agent_id=request.agent_id,
-            user_id=request.user_id,
-        )
+        effective_agent_id = request.agent_id
+        if not effective_agent_id and get_db_if_connected():
+            first = get_db_if_connected().agents.find_one()
+            if first:
+                effective_agent_id = str(first["_id"])
+        if effective_agent_id:
+            response_text = run_agent_chat_genai(
+                message=request.message.strip(),
+                session_id=request.session_id,
+                agent_id=effective_agent_id,
+                user_id=request.user_id,
+            )
+        else:
+            response_text = run_agent_chat(
+                message=request.message.strip(),
+                session_id=request.session_id,
+                agent_id=request.agent_id,
+                user_id=request.user_id,
+            )
         return ChatResponse(
             response=response_text,
             session_id=request.session_id,

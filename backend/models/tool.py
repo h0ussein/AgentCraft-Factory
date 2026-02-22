@@ -119,3 +119,37 @@ def create_tool_doc(
     }
     result = col.insert_one(doc)
     return str(result.inserted_id)
+
+
+def create_dynamic_tool_doc(
+    name: str,
+    description: str,
+    tool_type: str,
+    owner_agent_id: str | None = None,
+    file_path: str | None = None,
+    function_declaration: dict | None = None,
+    code_body: str | None = None,
+    required_api_keys: list | None = None,
+    public_api_keys: dict | None = None,
+) -> str:
+    """
+    Insert a dynamic tool document (from find_or_create_tool). Supports:
+    - tool_type "api": function_declaration (and optional file_path for Python impl)
+    - tool_type "code": code_body (standalone script), file_path optional/empty
+    """
+    col = get_tool_collection()
+    doc = {
+        "name": name,
+        "description": description,
+        "tool_type": tool_type,
+        "file_path": file_path or "",
+        "owner_agent_id": owner_agent_id,
+        "required_api_keys": required_api_keys or [],
+        "public_api_keys": public_api_keys or {},
+    }
+    if function_declaration is not None:
+        doc["function_declaration"] = function_declaration
+    if code_body is not None:
+        doc["code_body"] = code_body
+    result = col.insert_one(doc)
+    return str(result.inserted_id)
