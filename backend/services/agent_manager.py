@@ -320,22 +320,35 @@ def run_agent_chat_genai(
         return contents_list
 
     contents_list = build_contents()
-    max_retries = 2
-    for attempt in range(max_retries):
-        manager = AgentManager(agent_id=agent_id, user_id=user_id)
-        response_text, retry_requested = manager.chat(contents_list)
-        if not retry_requested:
-            break
-        if attempt + 1 >= max_retries:
-            break
-        contents_list = build_contents()
-
-    if session_id:
+    keys = get_gemini_api_keys() or []
+    last_error = None
+    for api_key in keys:
+        if not api_key:
+            continue
         try:
-            append_messages(session_id, agent_id, [
-                {"role": "user", "content": message},
-                {"role": "assistant", "content": response_text},
-            ])
-        except Exception:
-            pass
-    return response_text
+            manager = AgentManager(agent_id=agent_id, user_id=user_id, api_key=api_key.strip())
+            max_retries = 2
+            response_text = ""
+            for attempt in range(max_retries):
+                response_text, retry_requested = manager.chat(contents_list)
+                if not retry_requested:
+                    break
+                if attempt + 1 < max_retries:
+                    contents_list = build_contents()
+            if session_id:
+                try:
+                    append_messages(session_id, agent_id, [
+                        {"role": "user", "content": message},
+                        {"role": "assistant", "content": response_text},
+                    ])
+                except Exception:
+                    pass
+            return response_text
+        except Exception as e:
+            last_error = e
+            if is_retryable_gemini_error(e):
+                continue
+            raise
+    if last_error:
+        raise last_error
+    raise ValueError("No Gemini API key set. Add GOOGLE_API_KEY or GEMINI_API_KEY in .env")

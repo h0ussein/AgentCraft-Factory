@@ -28,7 +28,6 @@ def get_gemini_model_for_tools() -> str:
         return env
     return GEMINI_MODEL_2_5_FLASH
 
-
 def get_gemini_api_keys() -> list[str]:
     """
     Return API keys in order: primary (GOOGLE_API_KEY or GEMINI_API_KEY), then
@@ -49,28 +48,29 @@ def get_gemini_api_keys() -> list[str]:
 
 
 def is_retryable_gemini_error(exc: BaseException) -> bool:
-    """True if the error is 429 rate limit or quota/resource exhausted (try next key)."""
-    # Check for status_code attribute (common in HTTP exceptions)
-    status_code = getattr(exc, "status_code", None)
-    if status_code == 429:
+    """True if the error is 429 rate limit or quota/resource exhausted (try next key, including third)."""
+    def check(e: BaseException | None) -> bool:
+        if e is None:
+            return False
+        status_code = getattr(e, "status_code", None)
+        if status_code == 429:
+            return True
+        code = getattr(e, "code", None)
+        if code == 429:
+            return True
+        msg = (getattr(e, "message", None) or str(e)).lower()
+        if "429" in msg or "resource_exhausted" in msg or "quota" in msg or "rate limit" in msg:
+            return True
+        if hasattr(e, "response") and getattr(e.response, "status_code", None) == 429:
+            return True
+        return False
+
+    if check(exc):
         return True
-    
-    # Check for code attribute
-    code = getattr(exc, "code", None)
-    if code == 429:
-        return True
-    
-    # Check error message for quota/rate limit indicators
-    msg = (getattr(exc, "message", None) or str(exc)).lower()
-    if "429" in msg or "resource_exhausted" in msg or "quota" in msg or "rate limit" in msg:
-        return True
-    
-    # Check for HTTPError or similar exceptions
-    if hasattr(exc, "response"):
-        response = getattr(exc, "response", None)
-        if response:
-            resp_status = getattr(response, "status_code", None)
-            if resp_status == 429:
-                return True
-    
+    if getattr(exc, "__cause__", None):
+        if check(exc.__cause__):
+            return True
+    if getattr(exc, "__context__", None):
+        if check(exc.__context__):
+            return True
     return False
