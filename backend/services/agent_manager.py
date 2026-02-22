@@ -17,9 +17,9 @@ from google import genai
 from google.genai import types
 
 try:
-    from config.gemini_keys import get_gemini_api_keys, is_retryable_gemini_error
+    from config.gemini_keys import get_gemini_api_keys_for_chat, is_retryable_gemini_error
 except Exception:
-    get_gemini_api_keys = lambda: []
+    get_gemini_api_keys_for_chat = lambda: []
     is_retryable_gemini_error = lambda e: False
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -128,7 +128,7 @@ class AgentManager:
             raise ValueError("MongoDB is not available. AgentManager requires MongoDB.")
         self.agent_id = agent_id
         self.user_id = user_id
-        self._api_key = api_key or (get_gemini_api_keys() or [None])[0]
+        self._api_key = api_key or (get_gemini_api_keys_for_chat() or [None])[0]
         if not self._api_key:
             raise ValueError("No Gemini API key. Set GOOGLE_API_KEY or GEMINI_API_KEY in .env")
         self._client = genai.Client(api_key=self._api_key.strip())
@@ -396,7 +396,7 @@ def run_agent_chat_genai(
         return contents_list
 
     contents_list = build_contents()
-    keys = get_gemini_api_keys() or []
+    keys = get_gemini_api_keys_for_chat() or []
     last_error = None
     for api_key in keys:
         if not api_key:

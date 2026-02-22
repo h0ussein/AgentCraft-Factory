@@ -3,9 +3,8 @@
 # Supported models: Gemini 2.5 Flash, 2.5 Pro, 3 Flash (all API keys can use any of these).
 
 import os
-
-from dotenv import load_dotenv
 from pathlib import Path
+from dotenv import load_dotenv
 
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(_ENV_PATH)
@@ -32,7 +31,7 @@ def get_gemini_api_keys() -> list[str]:
     """
     Return API keys in order: primary (GOOGLE_API_KEY or GEMINI_API_KEY), then
     secondary (GEMINI_API_KEY_SECONDARY), then third (GEMINI_API_KEY_THIRD) if set.
-    Used to fallback on 429/quota exhausted.
+    Used internally; prefer get_gemini_api_keys_for_tools / get_gemini_api_keys_for_chat.
     """
     primary = (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
     secondary = (os.getenv("GEMINI_API_KEY_SECONDARY") or "").strip()
@@ -44,6 +43,26 @@ def get_gemini_api_keys() -> list[str]:
         keys.append(secondary)
     if third and third != primary and third != secondary:
         keys.append(third)
+    return keys
+
+
+def get_gemini_api_keys_for_tools() -> list[str]:
+    """
+    One key for tool creation only: primary (GOOGLE_API_KEY / GEMINI_API_KEY).
+    Used for: tool name suggestion, code generation, safety review, public key detection, dynamic tool discovery.
+    """
+    keys = get_gemini_api_keys()
+    return keys[:1] if keys else []
+
+
+def get_gemini_api_keys_for_chat() -> list[str]:
+    """
+    Two keys for chat (with fallback on 429): secondary and third.
+    If only one or two keys are set, chat uses the remaining key(s); if only one key exists, that key is used for chat too.
+    """
+    keys = get_gemini_api_keys()
+    if len(keys) > 1:
+        return keys[1:]
     return keys
 
 

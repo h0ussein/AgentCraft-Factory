@@ -53,13 +53,13 @@ SAFE - if the code contains only allowed patterns and no forbidden ones.
 UNSAFE: <brief reason> - if any forbidden pattern or risk is found."""
 
 
-from config.gemini_keys import get_gemini_api_keys, get_gemini_model_for_tools, is_retryable_gemini_error
+from config.gemini_keys import get_gemini_api_keys_for_tools, get_gemini_model_for_tools, is_retryable_gemini_error
 
 
 def _get_genai_client(api_key: str | None = None):
-    """Create GenAI client. If api_key is None, uses first key from get_gemini_api_keys()."""
+    """Create GenAI client. If api_key is None, uses first key from get_gemini_api_keys_for_tools()."""
     if api_key is None:
-        keys = get_gemini_api_keys()
+        keys = get_gemini_api_keys_for_tools()
         if not keys:
             raise ValueError(
                 "Please add GOOGLE_API_KEY or GEMINI_API_KEY in .env"
@@ -92,7 +92,7 @@ def suggest_short_tool_name(user_description: str) -> str:
 Suggest a very short name for this tool: 2-4 words, snake_case, e.g. math_tool, weather_tool, btc_price, do_calc.
 Do NOT use long names like "tool_create_a_tool_can_do_math". Reply with ONLY the name, nothing else."""
     config = types.GenerateContentConfig(temperature=0.1, max_output_tokens=32)
-    keys = get_gemini_api_keys()
+    keys = get_gemini_api_keys_for_tools()
     for api_key in keys:
         if not api_key:
             continue
@@ -134,7 +134,7 @@ Output only the function code, no markdown."""
         max_output_tokens=2048,
         system_instruction=TOOL_GENERATION_SYSTEM,
     )
-    keys = get_gemini_api_keys()
+    keys = get_gemini_api_keys_for_tools()
     last_error = None
     for idx, api_key in enumerate(keys):
         if not api_key:
@@ -181,7 +181,7 @@ Code:
         max_output_tokens=256,
         system_instruction=SAFETY_REVIEW_SYSTEM,
     )
-    keys = get_gemini_api_keys()
+    keys = get_gemini_api_keys_for_tools()
     last_error = None
     for idx, api_key in enumerate(keys):
         if not api_key:
@@ -265,9 +265,9 @@ def extract_api_key_requirements(code: str) -> List[str]:
     return sorted(list(set(matches)))
 
 
-# Fallback map for well-known public/demo API keys when Gemini returns NONE. Testing only; users should add their own in Admin or .env.
+# Fallback map for well-known public/demo API keys when Gemini returns NONE. Add your own in Admin.
 PUBLIC_API_KEY_FALLBACKS: Dict[str, str] = {
-    "OPENWEATHER_API_KEY": "",  # Set a demo key here for testing if desired; else leave empty and use Admin/.env
+    "OPENWEATHER_API_KEY": "",
 }
 
 
@@ -334,7 +334,7 @@ If you find a real public/demo key value, use it. If you truly have no public ke
         temperature=0.1,
         max_output_tokens=512,
     )
-    keys = get_gemini_api_keys()
+    keys = get_gemini_api_keys_for_tools()
     last_error = None
     for idx, api_key in enumerate(keys):
         if not api_key:
@@ -367,7 +367,7 @@ If you find a real public/demo key value, use it. If you truly have no public ke
                 else:
                     break
             break
-    # Apply minimal fallback for well-known keys (testing only; users should add their own in Admin or .env)
+    # Apply minimal fallback for well-known keys (users should add their own in Admin)
     fallback = {}
     for k in required_keys:
         if k in PUBLIC_API_KEY_FALLBACKS and PUBLIC_API_KEY_FALLBACKS[k]:

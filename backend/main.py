@@ -13,7 +13,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
 from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 
-# Always load .env from backend folder (no dependence on process cwd)
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # Import tools manager and agent factory
@@ -28,7 +27,11 @@ from tools_manager import (
 from agent_factory import run_agent_chat, _load_functions_from_file
 from services.agent_manager import run_agent_chat_genai, GENERATED_IMAGES_DIR, GENERATED_AUDIO_DIR
 from config.db import get_db_if_connected
-from config.gemini_keys import get_gemini_api_keys, ALLOWED_GEMINI_MODELS
+from config.gemini_keys import (
+    get_gemini_api_keys_for_tools,
+    get_gemini_api_keys_for_chat,
+    ALLOWED_GEMINI_MODELS,
+)
 from services.agents import list_agents_from_db
 from models.chat_history import list_all_sessions, get_session_history, delete_session, delete_all_sessions_for_agent
 
@@ -216,12 +219,13 @@ def health():
 @api.post("/create-tool", response_model=CreateToolResponse)
 def create_tool(request: CreateToolRequest):
     """
-    Generate a new Python tool only if every required API key is available:
-    from Admin-stored APIs or from a detected public API. Otherwise returns 400.
+    Generate a new Python tool. API keys are resolved in order: (1) public/demo keys
+    from Gemini search, (2) Admin-stored APIs. Tool is still created if some keys
+    are missing; user is prompted to add them in Admin.
     """
     if not request.prompt or not request.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is required.")
-    if not get_gemini_api_keys():
+    if not get_gemini_api_keys_for_tools():
         raise HTTPException(
             status_code=503,
             detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
@@ -231,23 +235,18 @@ def create_tool(request: CreateToolRequest):
             user_description=request.prompt.strip(),
             tool_name=request.tool_name.strip() if request.tool_name else None,
         )
-        # Resolve keys: (1) admin-stored APIs, (2) public key search (Gemini), (3) process env (incl. aliases)
+        # Resolve keys: (1) public API search first (Gemini/demo keys), (2) admin-stored APIs only (no env)
         resolved = {}
+        for k in required_api_keys:
+            resolved[k] = (public_api_keys.get(k) or "").strip() or None
         try:
             from models.admin_api import get_admin_api_values_for_keys
-            resolved = get_admin_api_values_for_keys(required_api_keys)
+            admin_vals = get_admin_api_values_for_keys(required_api_keys)
+            for k in required_api_keys:
+                if not resolved.get(k) and admin_vals.get(k):
+                    resolved[k] = (admin_vals.get(k) or "").strip() or None
         except Exception:
             pass
-        for k in required_api_keys:
-            if k not in resolved or not resolved[k]:
-                resolved[k] = (public_api_keys.get(k) or "").strip() or None
-        for k in required_api_keys:
-            if resolved.get(k):
-                continue
-            val = (os.getenv(k) or "").strip() or None
-            if not val and k == "OPENWEATHER_API_KEY":
-                val = (os.getenv("WEATHER_API_KEY") or "").strip() or None
-            resolved[k] = val
         missing = [k for k in required_api_keys if not resolved.get(k)]
         # Create tool even when some keys are missing; runtime will prompt "Please add your [KEY] in settings"
         path = write_tool_file(code, base_name)
@@ -290,7 +289,7 @@ def create_tool(request: CreateToolRequest):
             if used:
                 message += " Keys used: " + ", ".join(used) + "."
         if missing:
-            message += " Add these keys in Admin or .env to use the tool: " + ", ".join(missing) + "."
+            message += " Add these keys in Admin to use the tool: " + ", ".join(missing) + "."
         return CreateToolResponse(
             success=True,
             message=message,
@@ -356,7 +355,7 @@ def chat(chat_request: ChatRequest, request: Request):
     """
     if not chat_request.message or not chat_request.message.strip():
         raise HTTPException(status_code=400, detail="message is required.")
-    if not get_gemini_api_keys():
+    if not get_gemini_api_keys_for_chat():
         raise HTTPException(
             status_code=503,
             detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",

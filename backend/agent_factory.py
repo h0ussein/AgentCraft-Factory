@@ -17,9 +17,9 @@ from agno.models.google import Gemini
 load_dotenv()
 
 try:
-    from config.gemini_keys import get_gemini_api_keys, is_retryable_gemini_error
+    from config.gemini_keys import get_gemini_api_keys_for_chat, is_retryable_gemini_error
 except Exception:
-    get_gemini_api_keys = lambda: []
+    get_gemini_api_keys_for_chat = lambda: []
     is_retryable_gemini_error = lambda e: False
 
 CUSTOM_TOOLS_DIR = Path(__file__).resolve().parent / "custom_tools"
@@ -265,7 +265,7 @@ def run_agent_chat(
                 injected_env[k] = os.environ.get(k)
                 os.environ[k] = str(v)
 
-    keys = get_gemini_api_keys()
+    keys = get_gemini_api_keys_for_chat()
     saved_gemini = {
         "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY"),
         "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY"),

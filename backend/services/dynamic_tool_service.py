@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 
 from config.gemini_keys import (
-    get_gemini_api_keys,
+    get_gemini_api_keys_for_tools,
     get_gemini_model_for_tools,
     is_retryable_gemini_error,
 )
@@ -38,7 +38,7 @@ Rules:
 
 def _get_client(api_key: str | None = None) -> genai.Client:
     if api_key is None:
-        keys = get_gemini_api_keys()
+        keys = get_gemini_api_keys_for_tools()
         if not keys:
             raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY is not set in .env")
         api_key = keys[0]
@@ -81,7 +81,7 @@ Search for a public API or Python library that can fulfill this. If you find one
         max_output_tokens=4096,
         system_instruction=DYNAMIC_TOOL_SYSTEM,
     )
-    keys = get_gemini_api_keys()
+    keys = get_gemini_api_keys_for_tools()
     last_error = None
     for idx, api_key in enumerate(keys):
         if not api_key:
