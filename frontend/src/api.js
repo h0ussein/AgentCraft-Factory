@@ -46,6 +46,20 @@ export async function createTool(prompt, toolName = null, agentId = null) {
   return res.json();
 }
 
+/** Test a newly created tool (run once with no arguments). filePath from create-tool response. */
+export async function testTool(filePath) {
+  const res = await fetch(`${API_BASE}/test-tool`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_path: filePath }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Test tool failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function listAgents() {
   const res = await fetch(`${API_BASE}/agents`);
   if (!res.ok) {

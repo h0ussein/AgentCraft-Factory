@@ -23,8 +23,9 @@ from tools_manager import (
     extract_api_key_requirements,
     generate_tool_code_and_keys,
     write_tool_file,
+    CUSTOM_TOOLS_DIR as TOOLS_DIR,
 )
-from agent_factory import run_agent_chat
+from agent_factory import run_agent_chat, _load_functions_from_file
 from services.agent_manager import run_agent_chat_genai
 from config.db import get_db_if_connected
 from config.gemini_keys import get_gemini_api_keys, ALLOWED_GEMINI_MODELS
@@ -121,6 +122,18 @@ class CreateToolResponse(BaseModel):
     file_name: str = Field(..., description="Name of the file (e.g. tool_weather.py)")
 
 
+class TestToolRequest(BaseModel):
+    """Request body for POST /test-tool"""
+    file_path: str = Field(..., description="Path or filename of the tool to test (from create-tool response)")
+
+
+class TestToolResponse(BaseModel):
+    """Response from testing a tool"""
+    success: bool = True
+    output: str = Field(..., description="Tool output or message")
+    needs_params: bool = Field(False, description="True if tool requires parameters and was not invoked")
+
+
 class ChatRequest(BaseModel):
     """Request body for POST /chat"""
     message: str = Field(..., description="User message to send to the agent")
@@ -183,6 +196,7 @@ def root():
             "GET /agents": "List all agents from DB with their tools",
             "POST /agents": "Create a new agent",
             "POST /create-tool": "Generate a new tool from a natural language prompt",
+            "POST /test-tool": "Test a newly created tool (run once with no arguments)",
             "POST /chat": "Send a message to the dynamic agent and get a response",
             "GET /tools": "List generated tool files",
         },
@@ -293,6 +307,43 @@ def create_tool(request: CreateToolRequest):
                 detail="The AI service is currently at capacity. Please try again in a few moments. If this persists, the API quota may have been exceeded."
             )
         raise HTTPException(status_code=500, detail=f"Tool generation failed: {e}")
+
+
+@api.post("/test-tool", response_model=TestToolResponse)
+def test_tool(request: TestToolRequest):
+    """
+    Run a newly created tool once (no arguments) to verify it loads and executes.
+    If the tool requires parameters, returns success with a message to test in chat.
+    """
+    if not request.file_path or not request.file_path.strip():
+        raise HTTPException(status_code=400, detail="file_path is required.")
+    path = Path(request.file_path.strip())
+    if not path.is_absolute() or not path.exists():
+        path = TOOLS_DIR / path.name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Tool file not found: {path.name}")
+    try:
+        funcs = _load_functions_from_file(path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load tool: {e}")
+    if not funcs:
+        raise HTTPException(status_code=400, detail="No callable tool function found in file.")
+    fn = funcs[0]
+    try:
+        result = fn()
+    except TypeError as e:
+        err = str(e).lower()
+        if "required" in err or "missing" in err or "positional" in err:
+            return TestToolResponse(
+                success=True,
+                output="Tool requires parameters. Use it in chat to test with real inputs.",
+                needs_params=True,
+            )
+        raise HTTPException(status_code=500, detail=f"Tool call failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tool execution failed: {str(e)}")
+    out = result if result is None else str(result)
+    return TestToolResponse(success=True, output=out or "(no output)", needs_params=False)
 
 
 @api.post("/chat", response_model=ChatResponse)

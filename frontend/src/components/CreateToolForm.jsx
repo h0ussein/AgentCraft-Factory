@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { createTool, listAgents } from "../api";
+import { createTool, listAgents, testTool } from "../api";
 
 const PLACEHOLDER =
   "e.g., Create a tool that fetches the current price of Bitcoin in USD and returns a summary for an investor. Use the CoinGecko public API.";
@@ -18,6 +18,9 @@ export default function CreateToolForm({ onClose, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [testLoading, setTestLoading] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [testError, setTestError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +53,8 @@ export default function CreateToolForm({ onClose, onSuccess }) {
     try {
       const data = await createTool(prompt.trim(), null, agentId || null);
       setResult(data);
+      setTestResult(null);
+      setTestError(null);
       onSuccess?.(data);
     } catch (err) {
       const errorMessage = err.message || "Failed to create tool";
@@ -61,6 +66,21 @@ export default function CreateToolForm({ onClose, onSuccess }) {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleTestTool() {
+    if (!result?.file_path) return;
+    setTestError(null);
+    setTestResult(null);
+    setTestLoading(true);
+    try {
+      const data = await testTool(result.file_path);
+      setTestResult(data);
+    } catch (err) {
+      setTestError(err.message || "Test failed");
+    } finally {
+      setTestLoading(false);
     }
   }
 
@@ -132,9 +152,34 @@ export default function CreateToolForm({ onClose, onSuccess }) {
             </div>
           )}
           {result && (
-            <div className="mt-3 p-3 rounded-lg bg-slate-900 border border-slate-600">
-              <p className="text-sm text-green-400 font-medium">Tool created successfully</p>
-              <p className="text-xs text-slate-400 mt-1">{result.file_name}</p>
+            <div className="mt-3 space-y-2">
+              <div className="p-3 rounded-lg bg-slate-900 border border-slate-600">
+                <p className="text-sm text-green-400 font-medium">Tool created successfully</p>
+                <p className="text-xs text-slate-400 mt-1">{result.file_name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleTestTool}
+                disabled={testLoading}
+                className="w-full min-h-[44px] py-2.5 rounded-xl border border-cyan-500/60 text-cyan-300 hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation text-sm font-medium"
+              >
+                {testLoading ? "Testing…" : "Test tool"}
+              </button>
+              {testResult && (
+                <div className={`p-3 rounded-lg border text-sm ${
+                  testResult.needs_params
+                    ? "bg-slate-900 border-slate-600 text-slate-300"
+                    : "bg-slate-900 border-green-500/40 text-green-200"
+                }`}>
+                  <p className="font-medium text-slate-400 text-xs uppercase tracking-wide mb-1">Test result</p>
+                  <p className="whitespace-pre-wrap break-words">{testResult.output}</p>
+                </div>
+              )}
+              {testError && (
+                <div className="p-3 rounded-lg border bg-red-500/10 border-red-500/50 text-red-400 text-sm">
+                  {testError}
+                </div>
+              )}
             </div>
           )}
           <div className="flex gap-3 mt-4">
