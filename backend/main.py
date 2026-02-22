@@ -310,16 +310,30 @@ def chat(request: ChatRequest):
     try:
         effective_agent_id = request.agent_id
         if not effective_agent_id and get_db_if_connected():
-            first = get_db_if_connected().agents.find_one()
-            if first:
-                effective_agent_id = str(first["_id"])
+            db = get_db_if_connected()
+            if db is not None:
+                first = db.agents.find_one()
+                if first:
+                    effective_agent_id = str(first["_id"])
         if effective_agent_id:
-            response_text = run_agent_chat_genai(
-                message=request.message.strip(),
-                session_id=request.session_id,
-                agent_id=effective_agent_id,
-                user_id=request.user_id,
-            )
+            try:
+                response_text = run_agent_chat_genai(
+                    message=request.message.strip(),
+                    session_id=request.session_id,
+                    agent_id=effective_agent_id,
+                    user_id=request.user_id,
+                )
+            except Exception as genai_err:
+                err_msg = str(getattr(genai_err, "message", genai_err)).lower()
+                if "function calling is unsupported" in err_msg or ("invalid_argument" in err_msg and "tool" in err_msg):
+                    response_text = run_agent_chat(
+                        message=request.message.strip(),
+                        session_id=request.session_id,
+                        agent_id=effective_agent_id,
+                        user_id=request.user_id,
+                    )
+                else:
+                    raise
         else:
             response_text = run_agent_chat(
                 message=request.message.strip(),
