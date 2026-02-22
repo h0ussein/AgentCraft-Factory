@@ -33,7 +33,8 @@ RULES (must follow):
    - Anything that could steal data, attack a server, or access resources outside the tool's stated purpose.
 8. Return a string result that the agent can show to the user. Do not print(); use return.
 9. Output ONLY valid Python code for the function. No markdown code fences, no explanation before or after.
-10. Function name must be SHORT and simple (e.g. math_tool, get_weather, do_calc). Do NOT use long names like tool_that_can_do_math_operations. Use snake_case, 2-4 words max."""
+10. Function name must be SHORT and simple (e.g. math_tool, get_weather, do_calc). Do NOT use long names like tool_that_can_do_math_operations. Use snake_case, 2-4 words max.
+11. For any external API, use ONLY https:// URLs (e.g. https://api.openweathermap.org). Never use http:// for API endpoints; security review rejects non-HTTPS."""
 
 # Safety Review: block anything that could harm privacy or attack systems
 SAFETY_REVIEW_SYSTEM = """You are a security reviewer for Python tool code. Reject anything that could compromise privacy, attack a system, or access resources outside the tool's purpose.
@@ -236,6 +237,20 @@ def _strip_markdown_code_block(text: str) -> str:
     return text
 
 
+def _normalize_api_urls_to_https(code: str) -> str:
+    """Rewrite common API http:// URLs to https:// so safety review passes (non-HTTPS is forbidden)."""
+    replacements = [
+        ("http://api.openweathermap.org", "https://api.openweathermap.org"),
+        ("http://api.weatherapi.com", "https://api.weatherapi.com"),
+        ('"http://', '"https://'),
+        ("'http://", "'https://"),
+    ]
+    out = code
+    for old, new in replacements:
+        out = out.replace(old, new)
+    return out
+
+
 def extract_api_key_requirements(code: str) -> List[str]:
     """
     Extract API key names from generated tool code by finding os.getenv('KEY_NAME') patterns.
@@ -378,6 +393,7 @@ def create_tool_file(user_description: str, tool_name: str | None = None) -> Tup
     """
     code = generate_tool_code(user_description)
     code = _strip_markdown_code_block(code)
+    code = _normalize_api_urls_to_https(code)
 
     # Safety Review step: Gemini checks its own generated code before saving
     is_safe, safety_message = _safety_review_generated_code(code)
@@ -419,6 +435,7 @@ def generate_tool_code_and_keys(user_description: str, tool_name: str | None = N
     """
     code = generate_tool_code(user_description)
     code = _strip_markdown_code_block(code)
+    code = _normalize_api_urls_to_https(code)
     is_safe, safety_message = _safety_review_generated_code(code)
     if not is_safe:
         raise ValueError(

@@ -221,7 +221,7 @@ class AgentManager:
             contents = [
                 types.Content(
                     role="user",
-                    parts=[types.Part.from_text(contents)],
+                    parts=[types.Part.from_text(text=contents)],
                 )
             ]
         config = self._get_config()
@@ -308,14 +308,14 @@ def run_agent_chat_genai(
                     continue
                 if role == "user":
                     contents_list.append(
-                        types.Content(role="user", parts=[types.Part.from_text(content)])
+                        types.Content(role="user", parts=[types.Part.from_text(text=content)])
                     )
                 else:
                     contents_list.append(
-                        types.Content(role="model", parts=[types.Part.from_text(content)])
+                        types.Content(role="model", parts=[types.Part.from_text(text=content)])
                     )
         contents_list.append(
-            types.Content(role="user", parts=[types.Part.from_text(message)])
+            types.Content(role="user", parts=[types.Part.from_text(text=message)])
         )
         return contents_list
 

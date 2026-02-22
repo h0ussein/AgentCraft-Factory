@@ -17,7 +17,7 @@ def get_weather(city: str) -> str:
     if not api_key:
         return 'Please add your OPENWEATHER_API_KEY in settings'
 
-    base_url = "http://api.openweathermap.org/data/2.5/weather"
+    base_url = "https://api.openweathermap.org/data/2.5/weather"
     params = {
         'q': city,
         'appid': api_key,
