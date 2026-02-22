@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
@@ -26,7 +26,7 @@ from tools_manager import (
     CUSTOM_TOOLS_DIR as TOOLS_DIR,
 )
 from agent_factory import run_agent_chat, _load_functions_from_file
-from services.agent_manager import run_agent_chat_genai
+from services.agent_manager import run_agent_chat_genai, GENERATED_IMAGES_DIR, GENERATED_AUDIO_DIR
 from config.db import get_db_if_connected
 from config.gemini_keys import get_gemini_api_keys, ALLOWED_GEMINI_MODELS
 from services.agents import list_agents_from_db
@@ -146,6 +146,8 @@ class ChatResponse(BaseModel):
     """Response from the agent"""
     response: str = Field(..., description="Agent's reply")
     session_id: str | None = Field(None, description="Session ID used (if any)")
+    image_urls: list[str] = Field(default_factory=list, description="URLs of images created by tools (if any)")
+    audio_urls: list[str] = Field(default_factory=list, description="URLs of audio/songs created by tools (if any)")
 
 
 class AgentToolRef(BaseModel):
@@ -347,54 +349,61 @@ def test_tool(request: TestToolRequest):
 
 
 @api.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
+def chat(chat_request: ChatRequest, request: Request):
     """
     Send a message to the dynamic agent. The agent uses all loaded tools from custom_tools/.
+    If a tool creates an image (image_url/image_path) or audio/song (audio_url/audio_path), those URLs are in image_urls/audio_urls.
     """
-    if not request.message or not request.message.strip():
+    if not chat_request.message or not chat_request.message.strip():
         raise HTTPException(status_code=400, detail="message is required.")
     if not get_gemini_api_keys():
         raise HTTPException(
             status_code=503,
             detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
         )
+    base_url = str(request.base_url).rstrip("/")
     try:
-        effective_agent_id = request.agent_id
+        effective_agent_id = chat_request.agent_id
         if not effective_agent_id and get_db_if_connected():
             db = get_db_if_connected()
             if db is not None:
                 first = db.agents.find_one()
                 if first:
                     effective_agent_id = str(first["_id"])
+        image_urls: list[str] = []
+        audio_urls: list[str] = []
         if effective_agent_id:
             try:
-                response_text = run_agent_chat_genai(
-                    message=request.message.strip(),
-                    session_id=request.session_id,
+                response_text, image_urls, audio_urls = run_agent_chat_genai(
+                    message=chat_request.message.strip(),
+                    session_id=chat_request.session_id,
                     agent_id=effective_agent_id,
-                    user_id=request.user_id,
+                    user_id=chat_request.user_id,
+                    base_url=base_url,
                 )
             except Exception as genai_err:
                 err_msg = str(getattr(genai_err, "message", genai_err)).lower()
                 if "function calling is unsupported" in err_msg or ("invalid_argument" in err_msg and "tool" in err_msg):
                     response_text = run_agent_chat(
-                        message=request.message.strip(),
-                        session_id=request.session_id,
+                        message=chat_request.message.strip(),
+                        session_id=chat_request.session_id,
                         agent_id=effective_agent_id,
-                        user_id=request.user_id,
+                        user_id=chat_request.user_id,
                     )
                 else:
                     raise
         else:
             response_text = run_agent_chat(
-                message=request.message.strip(),
-                session_id=request.session_id,
-                agent_id=request.agent_id,
-                user_id=request.user_id,
+                message=chat_request.message.strip(),
+                session_id=chat_request.session_id,
+                agent_id=chat_request.agent_id,
+                user_id=chat_request.user_id,
             )
         return ChatResponse(
             response=response_text,
-            session_id=request.session_id,
+            session_id=chat_request.session_id,
+            image_urls=image_urls,
+            audio_urls=audio_urls,
         )
     except Exception as e:
         # Check if it's a quota/rate limit error
@@ -702,6 +711,36 @@ def delete_session_endpoint(
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"ok": True, "message": "Session deleted"}
+
+
+@api.get("/generated-images/{filename}")
+def serve_generated_image(filename: str):
+    """
+    Serve images created by tools (saved under backend/generated_images/).
+    Only allows safe filenames (alphanumeric, dot, hyphen, underscore).
+    """
+    import re
+    if not re.match(r"^[a-zA-Z0-9._-]+$", filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = Path(GENERATED_IMAGES_DIR) / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(str(path), media_type="image/png" if filename.lower().endswith(".png") else None)
+
+
+@api.get("/generated-audio/{filename}")
+def serve_generated_audio(filename: str):
+    """
+    Serve audio/songs created by tools (saved under backend/generated_audio/).
+    Only allows safe filenames (alphanumeric, dot, hyphen, underscore).
+    """
+    import re
+    if not re.match(r"^[a-zA-Z0-9._-]+$", filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = Path(GENERATED_AUDIO_DIR) / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return FileResponse(str(path), media_type="audio/mpeg" if filename.lower().endswith(".mp3") else None)
 
 
 app.include_router(api, prefix="/api")

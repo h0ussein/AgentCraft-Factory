@@ -115,7 +115,9 @@ export default function ChatScreen({
       if (data.session_id && data.session_id !== sessionId) {
         setSessionId(data.session_id);
       }
-      setMessages((prev) => [...prev, { role: "agent", content: reply, id: `a-${Date.now()}` }]);
+      const imageUrls = Array.isArray(data?.image_urls) ? data.image_urls : [];
+      const audioUrls = Array.isArray(data?.audio_urls) ? data.audio_urls : [];
+      setMessages((prev) => [...prev, { role: "agent", content: reply, id: `a-${Date.now()}`, imageUrls, audioUrls }]);
     } catch (err) {
       const errorMessage = err.message || "Something went wrong";
       setError(errorMessage);
@@ -216,6 +218,26 @@ export default function ChatScreen({
                       ? "bg-yellow-500/20 border border-yellow-500/50 text-yellow-100"
                       : "bg-slate-700/80 text-slate-100"
                   }`}>
+                    {m.imageUrls?.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {m.imageUrls.map((url, i) => (
+                          <a key={`img-${i}`} href={url} target="_blank" rel="noopener noreferrer" className="block rounded-lg overflow-hidden border border-slate-600/50">
+                            <img src={url} alt={`Generated ${i + 1}`} className="max-w-full max-h-64 object-contain" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {m.audioUrls?.length > 0 && (
+                      <div className="flex flex-col gap-2 mb-2">
+                        {m.audioUrls.map((url, i) => (
+                          <div key={`audio-${i}`} className="rounded-lg border border-slate-600/50 p-2 bg-slate-800/50">
+                            <audio controls src={url} className="w-full max-w-sm" preload="metadata">
+                              <a href={url} target="_blank" rel="noopener noreferrer">Play song / audio</a>
+                            </audio>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {m.content}
                   </div>
                 </div>

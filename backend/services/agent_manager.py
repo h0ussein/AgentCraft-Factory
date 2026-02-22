@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,6 +24,59 @@ except Exception:
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 CUSTOM_TOOLS_DIR = BACKEND_DIR / "custom_tools"
+GENERATED_IMAGES_DIR = BACKEND_DIR / "generated_images"
+GENERATED_AUDIO_DIR = BACKEND_DIR / "generated_audio"
+
+AUDIO_EXTENSIONS = (".mp3", ".wav", ".ogg", ".m4a", ".webm")
+
+
+def _serve_image_path(image_path: str, base_url: str) -> str | None:
+    """
+    Copy a local image file to generated_images/ with a unique name and return the URL to serve it.
+    Returns None on error. Used when a tool returns {"image_path": "/path/to/file.png"}.
+    """
+    try:
+        path = Path(image_path)
+        if not path.is_absolute():
+            path = BACKEND_DIR / image_path
+        path = path.resolve()
+        if not path.exists() or not path.is_file():
+            return None
+        suffix = path.suffix.lower()
+        if suffix not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            suffix = ".png"
+        GENERATED_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+        safe_name = f"{uuid.uuid4().hex}{suffix}"
+        dest = GENERATED_IMAGES_DIR / safe_name
+        shutil.copy2(path, dest)
+        return f"{base_url.rstrip('/')}/api/generated-images/{safe_name}"
+    except Exception:
+        return None
+
+
+def _serve_audio_path(audio_path: str, base_url: str) -> str | None:
+    """
+    Copy a local audio file to generated_audio/ with a unique name and return the URL to serve it.
+    Used when a tool returns {"audio_path": "/path/to/file.mp3"} (e.g. for songs).
+    """
+    try:
+        path = Path(audio_path)
+        if not path.is_absolute():
+            path = BACKEND_DIR / audio_path
+        path = path.resolve()
+        if not path.exists() or not path.is_file():
+            return None
+        suffix = path.suffix.lower()
+        if suffix not in AUDIO_EXTENSIONS:
+            suffix = ".mp3"
+        GENERATED_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        safe_name = f"{uuid.uuid4().hex}{suffix}"
+        dest = GENERATED_AUDIO_DIR / safe_name
+        shutil.copy2(path, dest)
+        return f"{base_url.rstrip('/')}/api/generated-audio/{safe_name}"
+    except Exception:
+        return None
+
 
 _mongo_available = False
 try:
@@ -209,13 +264,16 @@ class AgentManager:
         self,
         contents: list[types.Content] | str,
         max_rounds: int = 10,
-    ) -> tuple[str, bool]:
+        base_url: str | None = None,
+    ) -> tuple[str, bool, list[str], list[str]]:
         """
         Run chat with the agent. Handles Part types for tool calls and function responses.
         If contents is a string, it is wrapped as a single user message. Otherwise uses
         the provided list of Content (history + new message).
-        Returns (final_text_response, retry_requested). When retry_requested is True,
+        Returns (final_text_response, retry_requested, image_urls, audio_urls). When retry_requested is True,
         the caller should re-run the same user message (agent will have the newly invented tool).
+        Tools that create images may return a dict with "image_url"/"image_path"; tools that create
+        audio/songs may return "audio_url"/"audio_path". Those are collected and served via base_url.
         """
         if isinstance(contents, str):
             contents = [
@@ -226,6 +284,8 @@ class AgentManager:
             ]
         config = self._get_config()
         current_contents = list(contents)
+        collected_image_urls: list[str] = []
+        collected_audio_urls: list[str] = []
         for _ in range(max_rounds):
             response = self._client.models.generate_content(
                 model=self._model_id,
@@ -235,7 +295,7 @@ class AgentManager:
             if not response.candidates or not response.candidates[0].content.parts:
                 text = getattr(response, "text", None)
                 out = (text.strip() if text else "") or "No response generated."
-                return (out, self._invention_triggered)
+                return (out, self._invention_triggered, collected_image_urls, collected_audio_urls)
 
             parts = response.candidates[0].content.parts
             function_calls = []
@@ -248,7 +308,7 @@ class AgentManager:
 
             if not function_calls:
                 out = "".join(text_parts) if text_parts else "No response generated."
-                return (out, self._invention_triggered)
+                return (out, self._invention_triggered, collected_image_urls, collected_audio_urls)
 
             model_content = types.Content(role="model", parts=parts)
             current_contents.append(model_content)
@@ -268,6 +328,20 @@ class AgentManager:
                         result = {"result": out} if not isinstance(out, dict) else out
                     except Exception as e:
                         result = {"error": str(e)}
+                # Collect image and audio URLs from tool result (convention: image_url/image_path, audio_url/audio_path)
+                if isinstance(result, dict):
+                    if result.get("image_url") and isinstance(result["image_url"], str):
+                        collected_image_urls.append(result["image_url"])
+                    if result.get("image_path") and isinstance(result["image_path"], str) and base_url:
+                        _url = _serve_image_path(result["image_path"], base_url)
+                        if _url:
+                            collected_image_urls.append(_url)
+                    if result.get("audio_url") and isinstance(result["audio_url"], str):
+                        collected_audio_urls.append(result["audio_url"])
+                    if result.get("audio_path") and isinstance(result["audio_path"], str) and base_url:
+                        _url = _serve_audio_path(result["audio_path"], base_url)
+                        if _url:
+                            collected_audio_urls.append(_url)
                 resp_part = types.Part.from_function_response(
                     name=name or "unknown",
                     response=result,
@@ -276,9 +350,9 @@ class AgentManager:
                 current_contents.append(tool_content)
 
             if self._invention_triggered:
-                return ("A new tool was created for your request. Retrying once with the new tool.", True)
+                return ("A new tool was created for your request. Retrying once with the new tool.", True, collected_image_urls, collected_audio_urls)
 
-        return ("Max tool rounds reached; please try a shorter request.", False)
+        return ("Max tool rounds reached; please try a shorter request.", False, collected_image_urls, collected_audio_urls)
 
 
 def run_agent_chat_genai(
@@ -286,12 +360,14 @@ def run_agent_chat_genai(
     session_id: str | None = None,
     agent_id: str | None = None,
     user_id: str | None = None,
-) -> str:
+    base_url: str | None = None,
+) -> tuple[str, list[str], list[str]]:
     """
     Run chat using AgentManager (google-genai with tools + code_execution + thinking).
     Loads last messages from MongoDB if session_id and agent_id are set.
     Invention loop: if the agent requests a new tool (request_dynamic_tool), we create it,
     save to DB, and re-run the same message once with the new tool attached.
+    Returns (response_text, image_urls, audio_urls). URLs for images/audio created by tools.
     """
     if not _mongo_available or not agent_id:
         raise ValueError("run_agent_chat_genai requires MongoDB and agent_id")
@@ -329,8 +405,12 @@ def run_agent_chat_genai(
             manager = AgentManager(agent_id=agent_id, user_id=user_id, api_key=api_key.strip())
             max_retries = 2
             response_text = ""
+            image_urls: list[str] = []
+            audio_urls: list[str] = []
             for attempt in range(max_retries):
-                response_text, retry_requested = manager.chat(contents_list)
+                response_text, retry_requested, image_urls, audio_urls = manager.chat(
+                    contents_list, base_url=base_url
+                )
                 if not retry_requested:
                     break
                 if attempt + 1 < max_retries:
@@ -343,7 +423,7 @@ def run_agent_chat_genai(
                     ])
                 except Exception:
                     pass
-            return response_text
+            return (response_text, image_urls, audio_urls)
         except Exception as e:
             last_error = e
             if is_retryable_gemini_error(e):

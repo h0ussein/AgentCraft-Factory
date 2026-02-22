@@ -22,3 +22,7 @@ logs
 tmp
 temp
 .cache
+
+# Backend: tool-generated media (served via /api/generated-images/ and /api/generated-audio/)
+backend/generated_images/
+backend/generated_audio/
