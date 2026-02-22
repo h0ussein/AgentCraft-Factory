@@ -1,6 +1,8 @@
 # models/admin_api.py
 # Admin-defined APIs: key_name, description, key_value (used when creating tools)
 
+from bson import ObjectId
+
 from config.db import get_db
 
 
@@ -61,3 +63,15 @@ def create_admin_api(description: str, key_name: str, key_value: str) -> str:
         return str(existing["_id"])
     result = col.insert_one(doc)
     return str(result.inserted_id)
+
+
+def delete_admin_api(api_id: str) -> bool:
+    """Delete an admin-defined API by id. Returns True if deleted, False if not found."""
+    if not (api_id or "").strip():
+        return False
+    col = get_admin_api_collection()
+    try:
+        result = col.delete_one({"_id": ObjectId(api_id)})
+        return result.deleted_count > 0
+    except Exception:
+        return False

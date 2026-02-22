@@ -160,7 +160,10 @@ export default function App() {
       {toolFormOpen && (
         <CreateToolForm
           onClose={() => setToolFormOpen(false)}
-          onSuccess={() => setToolFormOpen(false)}
+          onSuccess={() => {
+            setAgentsVersion((v) => v + 1);
+            setToolFormOpen(false);
+          }}
         />
       )}
 

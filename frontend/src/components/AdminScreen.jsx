@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession, listAdminApis, createAdminApi, listAdminTools, deleteAdminTool } from "../api";
+import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession, listAdminApis, createAdminApi, deleteAdminApi, listAdminTools, deleteAdminTool } from "../api";
 
 export default function AdminScreen() {
   const [passcode, setPasscode] = useState("");
@@ -17,6 +17,7 @@ export default function AdminScreen() {
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deletingToolId, setDeletingToolId] = useState(null);
+  const [deletingApiId, setDeletingApiId] = useState(null);
   // APIs form
   const [apiDescription, setApiDescription] = useState("");
   const [apiKeyName, setApiKeyName] = useState("");
@@ -115,6 +116,19 @@ export default function AdminScreen() {
       setError(err.message || "Failed to create API");
     } finally {
       setApiSubmitting(false);
+    }
+  }
+
+  async function handleDeleteApi(apiId) {
+    setError(null);
+    setDeletingApiId(apiId);
+    try {
+      await deleteAdminApi(apiId, passcode.trim());
+      setApis((prev) => prev.filter((a) => a.id !== apiId));
+    } catch (err) {
+      setError(err.message || "Delete failed");
+    } finally {
+      setDeletingApiId(null);
     }
   }
 
@@ -318,10 +332,23 @@ export default function AdminScreen() {
             ) : (
               <ul className="space-y-2">
                 {apis.map((api) => (
-                  <li key={api.id} className="rounded-xl bg-slate-800/70 border border-slate-600/50 p-3">
-                    <p className="font-medium text-white text-sm">{api.key_name}</p>
-                    {api.description && <p className="text-xs text-slate-500 mt-0.5">{api.description}</p>}
-                    <p className="text-xs text-slate-600 mt-1">Value: {api.key_value_masked}</p>
+                  <li
+                    key={api.id}
+                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/70 border border-slate-600/50 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-white text-sm">{api.key_name}</p>
+                      {api.description && <p className="text-xs text-slate-500 mt-0.5">{api.description}</p>}
+                      <p className="text-xs text-slate-600 mt-1">Value: {api.key_value_masked}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteApi(api.id)}
+                      disabled={deletingApiId === api.id}
+                      className="shrink-0 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 text-sm font-medium hover:bg-red-500/30 disabled:opacity-50"
+                    >
+                      {deletingApiId === api.id ? "Deleting…" : "Delete"}
+                    </button>
                   </li>
                 ))}
               </ul>

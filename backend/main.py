@@ -526,6 +526,26 @@ def create_admin_api(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@api.delete("/admin/apis/{api_id}")
+def delete_admin_api(
+    api_id: str,
+    x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
+):
+    """Delete an admin-defined API key. Requires admin passcode."""
+    _require_admin_passcode(x_admin_passcode)
+    try:
+        from models.admin_api import delete_admin_api as _delete
+        if not _delete(api_id):
+            raise HTTPException(status_code=404, detail="API key not found")
+        return {"ok": True, "message": "API key deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if get_db_if_connected() is None:
+            raise HTTPException(status_code=503, detail="MongoDB not connected")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @api.get("/admin/tools")
 def list_admin_tools(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
     """List all tools (from DB) for admin with agent name. Requires admin passcode."""

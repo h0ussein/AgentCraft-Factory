@@ -185,6 +185,19 @@ export async function createAdminApi(passcode, description, keyName, keyValue) {
   return res.json();
 }
 
+/** Delete an admin API key by id. Requires passcode. */
+export async function deleteAdminApi(apiId, passcode) {
+  const res = await fetch(`${API_BASE}/admin/apis/${encodeURIComponent(apiId)}`, {
+    method: "DELETE",
+    headers: { "X-Admin-Passcode": passcode },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to delete API key");
+  }
+  return res.json();
+}
+
 /** List all tools (admin). Requires passcode. */
 export async function listAdminTools(passcode) {
   const res = await fetch(`${API_BASE}/admin/tools`, {
