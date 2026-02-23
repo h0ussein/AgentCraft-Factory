@@ -3,26 +3,19 @@
  */
 
 import { useState, useEffect } from "react";
-import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession, listAdminApis, createAdminApi, deleteAdminApi, listAdminTools, deleteAdminTool } from "../api";
+import { listAgents, verifyAdminPasscode, deleteAgent, listSessions, deleteSession, listAdminTools, deleteAdminTool } from "../api";
 
 export default function AdminScreen() {
   const [passcode, setPasscode] = useState("");
   const [unlocked, setUnlocked] = useState(false);
-  const [activeTab, setActiveTab] = useState("agents"); // "agents" | "chats" | "apis" | "tools"
+  const [activeTab, setActiveTab] = useState("agents"); // "agents" | "chats" | "tools"
   const [agents, setAgents] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const [apis, setApis] = useState([]);
   const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deletingToolId, setDeletingToolId] = useState(null);
-  const [deletingApiId, setDeletingApiId] = useState(null);
-  // APIs form
-  const [apiDescription, setApiDescription] = useState("");
-  const [apiKeyName, setApiKeyName] = useState("");
-  const [apiKeyValue, setApiKeyValue] = useState("");
-  const [apiSubmitting, setApiSubmitting] = useState(false);
 
   useEffect(() => {
     if (!unlocked) return;
@@ -38,9 +31,6 @@ export default function AdminScreen() {
         } else if (activeTab === "chats") {
           const data = await listSessions();
           if (!cancelled) setSessions(data.sessions || []);
-        } else if (activeTab === "apis") {
-          const data = await listAdminApis(passcode.trim());
-          if (!cancelled) setApis(data.apis || []);
         } else if (activeTab === "tools") {
           const data = await listAdminTools(passcode.trim());
           if (!cancelled) setTools(data.tools || []);
@@ -97,38 +87,6 @@ export default function AdminScreen() {
       setError(err.message || "Delete failed");
     } finally {
       setDeletingId(null);
-    }
-  }
-
-  async function handleCreateApi(e) {
-    e.preventDefault();
-    if (!apiKeyName.trim() || !apiKeyValue.trim()) return;
-    setError(null);
-    setApiSubmitting(true);
-    try {
-      await createAdminApi(passcode.trim(), apiDescription, apiKeyName, apiKeyValue);
-      setApiDescription("");
-      setApiKeyName("");
-      setApiKeyValue("");
-      const data = await listAdminApis(passcode.trim());
-      setApis(data.apis || []);
-    } catch (err) {
-      setError(err.message || "Failed to create API");
-    } finally {
-      setApiSubmitting(false);
-    }
-  }
-
-  async function handleDeleteApi(apiId) {
-    setError(null);
-    setDeletingApiId(apiId);
-    try {
-      await deleteAdminApi(apiId, passcode.trim());
-      setApis((prev) => prev.filter((a) => a.id !== apiId));
-    } catch (err) {
-      setError(err.message || "Delete failed");
-    } finally {
-      setDeletingApiId(null);
     }
   }
 
@@ -234,17 +192,6 @@ export default function AdminScreen() {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("apis")}
-              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === "apis"
-                  ? "bg-amber-500 text-slate-900"
-                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-              }`}
-            >
-              APIs
-            </button>
-            <button
-              type="button"
               onClick={() => setActiveTab("tools")}
               className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
                 activeTab === "tools"
@@ -277,82 +224,6 @@ export default function AdminScreen() {
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "150ms" }} />
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
-          </div>
-        ) : activeTab === "apis" ? (
-          <div className="space-y-6">
-            <section className="rounded-xl bg-slate-800/70 border border-slate-600/50 p-4">
-              <h2 className="text-sm font-medium text-slate-300 mb-3">Create new API</h2>
-              <p className="text-xs text-slate-500 mb-3">
-                When someone creates a tool that needs an API key, we use two sources: (1) keys stored here (if the key name matches), and (2) an automatic search for a public/free API key for that tool. The tool is created only when every required key is found from either source.
-              </p>
-              <form onSubmit={handleCreateApi} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Description (e.g. OpenWeatherMap for weather)</label>
-                  <input
-                    type="text"
-                    value={apiDescription}
-                    onChange={(e) => setApiDescription(e.target.value)}
-                    placeholder="What this API is for"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Key name (e.g. OPENWEATHER_API_KEY) *</label>
-                  <input
-                    type="text"
-                    value={apiKeyName}
-                    onChange={(e) => setApiKeyName(e.target.value)}
-                    placeholder="OPENWEATHER_API_KEY"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Key value *</label>
-                  <input
-                    type="password"
-                    value={apiKeyValue}
-                    onChange={(e) => setApiKeyValue(e.target.value)}
-                    placeholder="Your API key"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={apiSubmitting || !apiKeyName.trim() || !apiKeyValue.trim()}
-                  className="px-4 py-2 rounded-lg bg-amber-500 text-slate-900 font-medium text-sm hover:bg-amber-400 disabled:opacity-50"
-                >
-                  {apiSubmitting ? "Saving…" : "Save API"}
-                </button>
-              </form>
-            </section>
-            {apis.length === 0 ? (
-              <p className="text-slate-400 text-sm">No APIs stored yet. You can add keys here; we also search for a public key when users create tools.</p>
-            ) : (
-              <ul className="space-y-2">
-                {apis.map((api) => (
-                  <li
-                    key={api.id}
-                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/70 border border-slate-600/50 p-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-white text-sm">{api.key_name}</p>
-                      {api.description && <p className="text-xs text-slate-500 mt-0.5">{api.description}</p>}
-                      <p className="text-xs text-slate-600 mt-1">Value: {api.key_value_masked}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteApi(api.id)}
-                      disabled={deletingApiId === api.id}
-                      className="shrink-0 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 text-sm font-medium hover:bg-red-500/30 disabled:opacity-50"
-                    >
-                      {deletingApiId === api.id ? "Deleting…" : "Delete"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
         ) : activeTab === "tools" ? (
           tools.length === 0 ? (

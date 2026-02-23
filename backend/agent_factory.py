@@ -187,7 +187,8 @@ def build_my_agent(agent_id: str, user_id: str | None = None, instructions: str 
     name = agent_doc.get("name") or "Dynamic Assistant"
     system_instruction = agent_doc.get("system_instruction") or (
         "You are a helpful AI assistant with access to tools. "
-        "Always check your available tools and use them when they can help the user."
+        "Always check your available tools and use them when they can help the user. "
+        "When the user asks for multiple steps (e.g. search then calculate then summarize), use your tools in sequence."
     )
     model_id = agent_doc.get("model_id") or "gemini-2.5-flash"
     tools_list = get_tools_for_agent(agent_id, user_id=user_id)
@@ -220,7 +221,8 @@ def create_dynamic_agent(
     name = "Dynamic Assistant"
     system_instruction = (
         "You are a helpful AI assistant with access to tools. "
-        "Always check your available tools and use them when they can help the user."
+        "Always check your available tools and use them when they can help the user. "
+        "When the user asks for multiple steps, use your tools in sequence."
     )
     model_id = "gemini-2.5-flash"
     tools_list: list[Callable] = get_all_custom_tools() if add_custom_tools else []
@@ -256,15 +258,26 @@ def run_agent_chat(
         except Exception:
             pass
 
-    # Inject User's API keys into environment for this run (for tools that use os.getenv)
+    # Inject tool public_api_keys into environment so tools can use os.getenv (no User/admin keys)
     injected_env = {}
-    if user_id and _mongo_available:
-        user_keys = get_user_api_keys(user_id)
-        for k, v in user_keys.items():
-            if v and not os.getenv(k):
-                injected_env[k] = os.environ.get(k)
-                os.environ[k] = str(v)
-
+    effective_agent_id = agent_id
+    if _mongo_available and not effective_agent_id:
+        from config.db import get_db_if_connected
+        db = get_db_if_connected()
+        if db is not None:
+            first = db.agents.find_one()
+            if first:
+                effective_agent_id = str(first["_id"])
+    if _mongo_available and effective_agent_id:
+        agent_doc = get_agent_by_id(effective_agent_id)
+        if agent_doc and agent_doc.get("tools"):
+            tool_docs = get_tools_by_ids(agent_doc["tools"])
+            for t in tool_docs:
+                pub = t.get("public_api_keys") or {}
+                for k, v in pub.items():
+                    if v and not os.getenv(k):
+                        injected_env[k] = os.environ.get(k)
+                        os.environ[k] = str(v)
     keys = get_gemini_api_keys_for_chat()
     saved_gemini = {
         "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY"),

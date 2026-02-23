@@ -140,12 +140,20 @@ class AgentManager:
         base = agent_doc.get("system_instruction") or (
             "You are a helpful AI assistant with access to tools. Use them when they can help the user."
         )
+        multi_tool_hint = (
+            " When the user asks for multiple steps (e.g. search then calculate then summarize), "
+            "use your tools in sequence: call each relevant tool in turn, using the results of the previous step."
+        )
+        code_hint = (
+            " You have code execution (Python) for math, calculations, simple charts, and text summaries. "
+            "Do not say you lack a math tool or cannot generate charts; use your code execution tool."
+        )
         invention_hint = (
             " If you cannot fulfill the request because you lack a suitable tool or API, "
             "call request_dynamic_tool(requirement) with a short description of what you need; "
             "a new tool will be created and your request will be retried."
         )
-        self._system_instruction = base.rstrip() + invention_hint
+        self._system_instruction = base.rstrip() + multi_tool_hint + code_hint + invention_hint
         self._model_id = agent_doc.get("model_id") or "gemini-2.5-flash"
         self._tools_list: list[types.Tool | Callable[..., Any]] = []
         self._tool_callables: dict[str, Callable[..., Any]] = {}
@@ -396,39 +404,63 @@ def run_agent_chat_genai(
         return contents_list
 
     contents_list = build_contents()
+    # Inject tool public_api_keys so tools can use os.getenv (no User/admin keys)
+    injected_env = {}
+    try:
+        agent_doc = get_agent_by_id(agent_id)
+        if agent_doc and agent_doc.get("tools"):
+            tool_docs = get_tools_by_ids(agent_doc["tools"])
+            for t in tool_docs:
+                pub = t.get("public_api_keys") or {}
+                for k, v in pub.items():
+                    if v and not os.getenv(k):
+                        injected_env[k] = os.environ.get(k)
+                        os.environ[k] = str(v)
+    except Exception:
+        pass
     keys = get_gemini_api_keys_for_chat() or []
     last_error = None
-    for api_key in keys:
-        if not api_key:
-            continue
-        try:
-            manager = AgentManager(agent_id=agent_id, user_id=user_id, api_key=api_key.strip())
-            max_retries = 2
-            response_text = ""
-            image_urls: list[str] = []
-            audio_urls: list[str] = []
-            for attempt in range(max_retries):
-                response_text, retry_requested, image_urls, audio_urls = manager.chat(
-                    contents_list, base_url=base_url
-                )
-                if not retry_requested:
-                    break
-                if attempt + 1 < max_retries:
-                    contents_list = build_contents()
-            if session_id:
-                try:
-                    append_messages(session_id, agent_id, [
-                        {"role": "user", "content": message},
-                        {"role": "assistant", "content": response_text},
-                    ])
-                except Exception:
-                    pass
-            return (response_text, image_urls, audio_urls)
-        except Exception as e:
-            last_error = e
-            if is_retryable_gemini_error(e):
+    try:
+        for api_key in keys:
+            if not api_key:
                 continue
-            raise
+            try:
+                manager = AgentManager(agent_id=agent_id, user_id=user_id, api_key=api_key.strip())
+                max_retries = 2
+                response_text = ""
+                image_urls: list[str] = []
+                audio_urls: list[str] = []
+                for attempt in range(max_retries):
+                    response_text, retry_requested, image_urls, audio_urls = manager.chat(
+                        contents_list, base_url=base_url
+                    )
+                    if not retry_requested:
+                        break
+                    if attempt + 1 < max_retries:
+                        contents_list = build_contents()
+                if session_id:
+                    try:
+                        append_messages(session_id, agent_id, [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": response_text},
+                        ])
+                    except Exception:
+                        pass
+                return (response_text, image_urls, audio_urls)
+            except Exception as e:
+                last_error = e
+                if is_retryable_gemini_error(e):
+                    continue
+                raise
+        if last_error:
+            raise last_error
+        raise ValueError("No Gemini API key set. Add GOOGLE_API_KEY or GEMINI_API_KEY in .env")
+    finally:
+        for k in injected_env:
+            if injected_env[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = injected_env[k]
     if last_error:
         raise last_error
     raise ValueError("No Gemini API key set. Add GOOGLE_API_KEY or GEMINI_API_KEY in .env")

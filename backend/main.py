@@ -219,9 +219,9 @@ def health():
 @api.post("/create-tool", response_model=CreateToolResponse)
 def create_tool(request: CreateToolRequest):
     """
-    Generate a new Python tool. API keys are resolved in order: (1) public/demo keys
-    from Gemini search, (2) Admin-stored APIs. Tool is still created if some keys
-    are missing; user is prompted to add them in Admin.
+    Generate a new Python tool. API keys are resolved from: (1) public/demo keys
+    from Gemini search, (2) server environment (os.getenv). If any required key
+    is missing, the tool is not created and a clear error is returned.
     """
     if not request.prompt or not request.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is required.")
@@ -235,24 +235,21 @@ def create_tool(request: CreateToolRequest):
             user_description=request.prompt.strip(),
             tool_name=request.tool_name.strip() if request.tool_name else None,
         )
-        # Resolve keys: (1) public API search first (Gemini/demo keys), (2) admin-stored APIs only (no env)
         resolved = {}
         for k in required_api_keys:
             resolved[k] = (public_api_keys.get(k) or "").strip() or None
-        try:
-            from models.admin_api import get_admin_api_values_for_keys
-            admin_vals = get_admin_api_values_for_keys(required_api_keys)
-            for k in required_api_keys:
-                if not resolved.get(k) and admin_vals.get(k):
-                    resolved[k] = (admin_vals.get(k) or "").strip() or None
-        except Exception:
-            pass
+        for k in required_api_keys:
+            if not resolved.get(k) and os.getenv(k):
+                resolved[k] = (os.getenv(k) or "").strip()
         missing = [k for k in required_api_keys if not resolved.get(k)]
-        # Create tool even when some keys are missing; runtime will prompt "Please add your [KEY] in settings"
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot create this tool: no public API key found for " + ", ".join(missing) + ". Use a service with a free tier or add the key to the server environment.",
+            )
         path = write_tool_file(code, base_name)
         from models.tool import create_tool_doc
         from models.agent import get_agent_collection
-        from models.user import ensure_user, set_user_api_key
         from bson import ObjectId
 
         tool_id = create_tool_doc(
@@ -263,14 +260,6 @@ def create_tool(request: CreateToolRequest):
             required_api_keys=required_api_keys,
             public_api_keys={k: v for k, v in resolved.items() if v},
         )
-        if request.user_id:
-            try:
-                ensure_user(request.user_id)
-                for key_name, key_value in resolved.items():
-                    if key_value:
-                        set_user_api_key(request.user_id, key_name, key_value)
-            except Exception:
-                pass
         if request.agent_id:
             get_agent_collection().update_one(
                 {"_id": ObjectId(request.agent_id)},
@@ -284,12 +273,10 @@ def create_tool(request: CreateToolRequest):
                     {"$push": {"tools": tool_id}},
                 )
         message = "Tool created. You can use it in /chat."
-        if resolved and any(resolved.get(k) for k in required_api_keys):
+        if resolved:
             used = [k for k in required_api_keys if resolved.get(k)]
             if used:
                 message += " Keys used: " + ", ".join(used) + "."
-        if missing:
-            message += " Add these keys in Admin to use the tool: " + ", ".join(missing) + "."
         return CreateToolResponse(
             success=True,
             message=message,
@@ -540,69 +527,6 @@ def admin_verify(x_admin_passcode: str | None = Header(None, alias="X-Admin-Pass
     """Verify admin passcode. Returns 200 if correct, 403 if wrong. Used to unlock Admin UI."""
     _require_admin_passcode(x_admin_passcode)
     return {"ok": True}
-
-
-class CreateAdminApiRequest(BaseModel):
-    """Request body for POST /admin/apis"""
-    description: str = Field("", description="What this API is for (e.g. OpenWeatherMap for weather)")
-    key_name: str = Field(..., description="Env key name tools use, e.g. OPENWEATHER_API_KEY")
-    key_value: str = Field(..., description="The API key value")
-
-
-@api.get("/admin/apis")
-def list_admin_apis(x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode")):
-    """List admin-defined APIs (for tool creation). Requires admin passcode."""
-    _require_admin_passcode(x_admin_passcode)
-    try:
-        from models.admin_api import list_admin_apis as _list
-        return {"apis": _list()}
-    except Exception as e:
-        if get_db_if_connected() is None:
-            raise HTTPException(status_code=503, detail="MongoDB not connected")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api.post("/admin/apis")
-def create_admin_api(
-    request: CreateAdminApiRequest,
-    x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
-):
-    """Create or update an admin-defined API key. Used when users create tools that need this key."""
-    _require_admin_passcode(x_admin_passcode)
-    try:
-        from models.admin_api import create_admin_api as _create
-        api_id = _create(
-            description=request.description.strip(),
-            key_name=request.key_name.strip(),
-            key_value=request.key_value.strip(),
-        )
-        return {"ok": True, "id": api_id}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        if get_db_if_connected() is None:
-            raise HTTPException(status_code=503, detail="MongoDB not connected")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api.delete("/admin/apis/{api_id}")
-def delete_admin_api(
-    api_id: str,
-    x_admin_passcode: str | None = Header(None, alias="X-Admin-Passcode"),
-):
-    """Delete an admin-defined API key. Requires admin passcode."""
-    _require_admin_passcode(x_admin_passcode)
-    try:
-        from models.admin_api import delete_admin_api as _delete
-        if not _delete(api_id):
-            raise HTTPException(status_code=404, detail="API key not found")
-        return {"ok": True, "message": "API key deleted"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        if get_db_if_connected() is None:
-            raise HTTPException(status_code=503, detail="MongoDB not connected")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @api.get("/admin/tools")
