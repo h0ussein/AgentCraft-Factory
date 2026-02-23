@@ -21,6 +21,7 @@ from tools_manager import (
     list_tool_files,
     extract_api_key_requirements,
     generate_tool_code_and_keys,
+    get_serper_search_tool_if_requested,
     write_tool_file,
     CUSTOM_TOOLS_DIR as TOOLS_DIR,
 )
@@ -231,10 +232,16 @@ def create_tool(request: CreateToolRequest):
             detail="GOOGLE_API_KEY or GEMINI_API_KEY is not set. Add in .env",
         )
     try:
-        code, base_name, required_api_keys, public_api_keys = generate_tool_code_and_keys(
-            user_description=request.prompt.strip(),
-            tool_name=request.tool_name.strip() if request.tool_name else None,
-        )
+        prompt = request.prompt.strip()
+        # Use built-in Serper web search tool when user asks for "search on web"
+        serper_code, serper_base, serper_keys, serper_public = get_serper_search_tool_if_requested(prompt)
+        if serper_code is not None:
+            code, base_name, required_api_keys, public_api_keys = serper_code, serper_base, serper_keys, serper_public
+        else:
+            code, base_name, required_api_keys, public_api_keys = generate_tool_code_and_keys(
+                user_description=prompt,
+                tool_name=request.tool_name.strip() if request.tool_name else None,
+            )
         resolved = {}
         for k in required_api_keys:
             resolved[k] = (public_api_keys.get(k) or "").strip() or None

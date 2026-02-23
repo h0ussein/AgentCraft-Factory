@@ -55,6 +55,58 @@ UNSAFE: <brief reason> - if any forbidden pattern or risk is found."""
 
 from config.gemini_keys import get_gemini_api_keys_for_tools, get_gemini_model_for_tools, is_retryable_gemini_error
 
+# Built-in web search tool using Google Serper (google.serper.dev). Used when user creates a "search on web" tool.
+SERPER_WEB_SEARCH_TOOL_CODE = '''"""
+Search the web using Google Serper API (google.serper.dev). Returns JSON search results as a string.
+"""
+import os
+import json
+import requests
+
+
+def search_web(query: str) -> str:
+    """Search the web for the given query. Returns search results as a string."""
+    api_key = os.getenv("SERPER_API_KEY")
+    if not api_key:
+        return "Please add your SERPER_API_KEY in settings"
+    try:
+        r = requests.post(
+            "https://google.serper.dev/search",
+            json={"q": query},
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.text
+    except Exception as e:
+        return f"Search failed: {e}"
+'''
+
+# Required env key for the built-in Serper search tool
+SERPER_REQUIRED_KEYS = ["SERPER_API_KEY"]
+
+
+def _is_web_search_request(prompt: str) -> bool:
+    """Return True if the user prompt is asking for a web search / search on web tool."""
+    lower = (prompt or "").strip().lower()
+    if "search" not in lower:
+        return False
+    return any(phrase in lower for phrase in (
+        "search on web", "search the web", "web search", "search internet",
+        "search online", "search on the web", "google search", "search web",
+    ))
+
+
+def get_serper_search_tool_if_requested(user_description: str) -> Tuple[str | None, str, List[str], Dict[str, str]]:
+    """
+    If the user is asking for a web search tool, return the built-in Serper tool.
+    Returns (code, base_name, required_keys, public_keys) or (None, "", [], {}) if not a web search request.
+    """
+    if not _is_web_search_request(user_description):
+        return None, "", [], {}
+    base = "search_web"
+    return SERPER_WEB_SEARCH_TOOL_CODE, base, SERPER_REQUIRED_KEYS.copy(), {}
+
 
 def _get_genai_client(api_key: str | None = None):
     """Create GenAI client. If api_key is None, uses first key from get_gemini_api_keys_for_tools()."""
